@@ -1,0 +1,20 @@
+# Virtue_RL — Intel macOS (x86_64) requirements. Tested Sept 2026 on Python 3.11.
+# Newer torch/numpy/numba have no Intel-mac wheels; these exact pins are the
+# last known-good combination for this platform.
+#
+#   python3.11 -m venv .venv && source .venv/bin/activate
+#   pip install -r requirements-macos-intel.txt
+#   pip install -e ./marlgrid --no-deps
+#   export PYGLET_HEADLESS=0   # Macs have a display; headless needs EGL (Linux-only)
+#
+# If the numba/llvmlite pins still try to compile from source, patch numba out
+# instead: it guards one optional function (see sociapl/README.md).
+
+torch==2.2.2         # last torch release with macOS x86_64 wheels (Python <=3.11)
+numpy==1.26.4        # torch 2.2.x predates and misbehaves with numpy 2
+gym==0.26.2
+gym-minigrid==1.2.2
+pyglet==2.1.16
+numba==0.59.1        # last numba/llvmlite pair with Intel-mac binary wheels
+llvmlite==0.42.0
+tqdm

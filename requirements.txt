@@ -1,0 +1,16 @@
+# Virtue_RL — Linux / Compute Canada requirements (Python 3.11+)
+# Install order matters: deps first, then marlgrid without its stale dep pins.
+#
+#   pip install -r requirements.txt
+#   pip install -e ./marlgrid --no-deps
+#
+# On Compute Canada, prefer the prebuilt wheelhouse where possible:
+#   pip install --no-index torch numpy tqdm && pip install -r requirements.txt
+
+torch>=2.2
+numpy>=1.26          # numpy 2.x works: marlgrid is patched (see marlgrid/PATCHES.md)
+gym==0.26.2          # marlgrid targets the legacy gym API; do NOT swap in gymnasium
+gym-minigrid==1.2.2  # deprecated upstream in favour of 'minigrid', but marlgrid imports this name
+pyglet>=2.0          # rendering backend; headless via PYGLET_HEADLESS=1 (default in envs.py)
+numba>=0.59          # used by marlgrid for the line-of-sight mask only
+tqdm
