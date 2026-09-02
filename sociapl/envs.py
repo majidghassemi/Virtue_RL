@@ -3,8 +3,9 @@
 The learner is always agent index 0. Experts (if any) are agents 1..n and are
 driven by ScriptedExpert, which has privileged access to the goal order.
 """
-import os
-os.environ.setdefault("PYGLET_HEADLESS", "1")
+import os, sys
+if sys.platform == "linux":  # EGL headless only exists on the cluster; macOS uses Cocoa
+    os.environ.setdefault("PYGLET_HEADLESS", "1")
 import warnings
 warnings.filterwarnings("ignore")
 

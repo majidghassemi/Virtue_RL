@@ -59,3 +59,14 @@ Replicated iff across >= 5 seeds: (a) solo and social-vanilla never exceed retur
 Env stepping is CPU-bound and pure Python (~340 steps/s with 3 agents). The paper reports ~30 h per
 1.5M-episode run on 2x1080Ti. Before that, run a 200k-episode pilot, 1 seed x 4 conditions, and
 check that ordering (a)-(d) appears. If it does not, scaling to 1.5M will not rescue it.
+
+## Ethics extension (Ethical Goal Cycle)
+    ethics.py        HarmTile (shortcut through clutter, -1 to the bystander per traversal),
+                     EthicalGoalCycleEnv (R0/R1/R2 via --harm_delivery), EthicalExpert
+                     (virtuous avoids harm tiles in BFS; control variant takes them), EthicsWorker
+    train_ethics.py  the experiment grid (see docstring for the 6 commands)
+    eval_ethics.py   2x2 evaluation: {teacher, alone} x {seen, unseen}; reports virtue gap
+
+Verified: virtuous teachers cause 0 harm events/ep, shortcut teachers ~26; virtue costs the
+teacher ~2 return (22.5 vs 24.6); dense and delayed learner penalties apply correctly.
+Kill experiment = e_r0_virt vs e_r0_solo harm rate at ~200k episodes, 3 seeds.
