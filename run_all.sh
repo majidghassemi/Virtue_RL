@@ -61,9 +61,10 @@ SBATCH_OPTS=(
     --time="$WALLTIME"
     --cpus-per-task="$CPUS"
     --mem="$MEM"
-    --mail-user="$MAIL_USER"
-    --mail-type="$MAIL_TYPE"
 )
+# MAIL_USER is blank unless set in .env; an empty --mail-user makes sbatch
+# complain, so only ask for mail when there is somewhere to send it.
+[[ -n "$MAIL_USER" ]] && SBATCH_OPTS+=(--mail-user="$MAIL_USER" --mail-type="$MAIL_TYPE")
 [[ -n "${EXCLUDE:-}" ]] && { SBATCH_OPTS+=(--exclude="$EXCLUDE"); echo "Excluding nodes: $EXCLUDE"; }
 
 # ── Which indices still need work? ────────────────────────────────────────────
@@ -142,10 +143,11 @@ fi
 
 if [[ "$EVAL_ONLY" -eq 1 || -n "${CHAIN_EVAL:-}" ]]; then
     dep=(); [[ -n "$LAST" ]] && dep=(--dependency="afterany:$LAST")
-    ejid=$(sbatch --parsable --account="$ACCOUNT" --time="$EVAL_WALLTIME" \
-                  --cpus-per-task="$CPUS" --mem="$MEM" \
-                  --mail-user="$MAIL_USER" --mail-type="$MAIL_TYPE" \
-                  ${EXCLUDE:+--exclude="$EXCLUDE"} "${dep[@]}" \
+    EVAL_OPTS=(--account="$ACCOUNT" --time="$EVAL_WALLTIME"
+               --cpus-per-task="$CPUS" --mem="$MEM")
+    [[ -n "$MAIL_USER" ]] && EVAL_OPTS+=(--mail-user="$MAIL_USER" --mail-type="$MAIL_TYPE")
+    [[ -n "${EXCLUDE:-}" ]] && EVAL_OPTS+=(--exclude="$EXCLUDE")
+    ejid=$(sbatch --parsable "${EVAL_OPTS[@]}" "${dep[@]}" \
                   --array="$EVAL_ARRAY" slurm/eval_array.sh)
     printf '  eval      -> job %s%s\n' "$ejid" "$([[ -n "$LAST" ]] && echo " (after $LAST)")"
 fi

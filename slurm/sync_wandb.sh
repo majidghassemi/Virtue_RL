@@ -57,12 +57,15 @@ fi
 
 # Credentials are only needed once there is actually something to push, so this
 # check comes after the counts — otherwise "nothing to sync" reads as an auth error.
+# WANDB_API_KEY normally arrives from .env, which slurm/env.sh sourced above.
 if [[ -z "${WANDB_API_KEY:-}" ]] && ! grep -q "api.wandb.ai" "$HOME/.netrc" 2>/dev/null; then
     echo "ERROR: no wandb credentials." >&2
-    echo "  Either:  wandb login                 (writes ~/.netrc, persists)" >&2
-    echo "  or:      export WANDB_API_KEY=...    (this shell only)" >&2
+    echo "  Set WANDB_API_KEY in .env (see example.env), then re-deploy:" >&2
+    echo "      bash slurm/deploy.sh          # from your local machine" >&2
+    echo "  Or, on the cluster:  wandb login  (writes ~/.netrc)" >&2
     exit 1
 fi
+[[ -n "${WANDB_API_KEY:-}" ]] && echo "Using WANDB_API_KEY from the environment (.env)."
 
 echo "Syncing to project '$WANDB_PROJECT'${WANDB_ENTITY:+ (entity $WANDB_ENTITY)} ..."
 echo ""

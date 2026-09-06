@@ -88,11 +88,15 @@ o = w.reset(); print('  env obs    ', o.shape, '(expected (21, 21, 3))')
 " )
 
 echo "── wandb ──────────────────────────────────────────────"
-if [[ -f "$HOME/.netrc" ]] && grep -q "api.wandb.ai" "$HOME/.netrc" 2>/dev/null; then
-    echo "  Already logged in (~/.netrc has an api.wandb.ai entry)."
+echo "  project: $WANDB_PROJECT${WANDB_ENTITY:+  entity: $WANDB_ENTITY}"
+if [[ -n "${WANDB_API_KEY:-}" ]]; then
+    echo "  API key found in .env — slurm/sync_wandb.sh is ready."
+elif grep -q "api.wandb.ai" "$HOME/.netrc" 2>/dev/null; then
+    echo "  Logged in via ~/.netrc — slurm/sync_wandb.sh is ready."
 else
-    echo "  Not logged in. Training does not need this (it runs offline), but"
-    echo "  slurm/sync_wandb.sh does. Run on a login node:"
+    echo "  No credentials. Training does not need any (it runs offline), but"
+    echo "  slurm/sync_wandb.sh does. Either set WANDB_API_KEY in .env locally"
+    echo "  and re-run 'bash slurm/deploy.sh', or here:"
     echo ""
     echo "      source venv/bin/activate && wandb login"
     echo ""

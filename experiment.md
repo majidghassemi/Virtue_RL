@@ -13,8 +13,10 @@ Never add `--gres` to these jobs.
 ## 0. The shape of it
 
 ```
+.env                    your credentials and cluster settings (gitignored; see example.env)
+slurm/deploy.sh         rsync code up / results down       ← run LOCALLY
 run_all.sh              submitter — the only thing you invoke (login node, bash, NOT sbatch)
-slurm/env.sh            account, walltime, paths, wandb settings   ← edit this to retarget
+slurm/env.sh            account, walltime, paths, wandb settings; loads .env
 slurm/grid.sh           which conditions x seeds exist, per GRID
 slurm/setup_env.sh      one-time venv build (login node)
 slurm/train_array.sh    one array task = one (condition, seed)
@@ -30,30 +32,56 @@ Two facts drive the whole design:
   that resume from `ckpt.pt`, and being killed by the clock is the normal way for
   a pass to end.
 
+The loop, once set up, is: edit locally → `bash slurm/deploy.sh` → `bash run_all.sh`
+on the cluster → `bash slurm/sync_wandb.sh`.
+
 ---
 
 ## 1. One-time setup
 
+### a. Credentials, locally
+
 ```bash
-ssh rorqual.alliancecan.ca
-git clone <this-repo> ~/Virtue_RL && cd ~/Virtue_RL
-bash slurm/setup_env.sh
+cp example.env .env && chmod 600 .env
+$EDITOR .env
+```
+
+Fill in at least `WANDB_API_KEY` (from https://wandb.ai/authorize), `DRAC_USER`,
+and `ACCOUNT`. `.env` is gitignored — credentials never enter the repository.
+
+Precedence is: shell environment > `.env` > the defaults in `slurm/env.sh`. So a
+one-off `ACCOUNT=def-other bash run_all.sh` still overrides everything.
+
+### b. Push the code
+
+```bash
+bash slurm/deploy.sh --dry-run     # see what would transfer
+bash slurm/deploy.sh
+```
+
+rsync, not git: no remote to configure, no commit needed to try a change, and it
+carries `.env` (which git will not) so your key reaches the cluster without ever
+being committed. `deploy.sh` sets `.env` to mode 600 on the far side, since
+`$HOME` is on a shared filesystem.
+
+Outputs never move: `venv/`, `runs/`, `logs/`, `wandb/`, caches and `*.pt` are all
+excluded, so deploying mid-experiment cannot disturb a running job.
+
+### c. Build the environment, on the cluster
+
+```bash
+ssh <you>@rorqual.alliancecan.ca
+cd ~/Virtue_RL && bash slurm/setup_env.sh
 ```
 
 `setup_env.sh` builds `venv/`, creates the `$SCRATCH/Virtue_RL` output tree,
 symlinks `sociapl/runs` and `logs` into it, and smoke-tests the imports. Expect
 to see `params 668,555` and `env obs (21, 21, 3)` — if the parameter count is
 different, the network does not match the paper and nothing downstream is
-comparable.
+comparable. It also reports whether it found your wandb key.
 
-Then log in to wandb (needed for syncing, not for training):
-
-```bash
-source venv/bin/activate && wandb login
-```
-
-If your account or email differs from the defaults, edit `slurm/env.sh` — it is
-the only file with cluster specifics in it.
+Only step (c) is once-per-cluster. Afterwards, shipping a change is just
+`bash slurm/deploy.sh` again.
 
 ### Why output lives on `$SCRATCH`
 
@@ -192,7 +220,7 @@ live one goes next time. It is idempotent: wandb marks each offline directory
 episodes>`, so a later pass appends to the same cloud run instead of creating a
 duplicate or overwriting earlier points.
 
-In wandb you get `project=virtue-rl`, one run per `(condition, seed)` named
+In wandb you get `project=virtue_rl`, one run per `(condition, seed)` named
 `e_r0_virt_s0`, grouped by condition so seeds band together. METRICS.md warns:
 *"Plot per-seed curves or batch-level histograms, never only the mean"* — the
 known failure mode is bimodal seeds, and means hide it.
@@ -224,7 +252,25 @@ compliance — *"A large gap is itself a finding (H-C), not a failure."*
 
 ---
 
-## 7. Reading the results
+## 7. Getting results back
+
+For plotting and analysis, wandb is usually enough — `sync_wandb.sh` pushes
+straight from the login node, so nothing has to come down to your laptop.
+
+When you do want the raw files:
+
+```bash
+bash slurm/deploy.sh --pull                 # log.csv, config.json, eval_*.json
+bash slurm/deploy.sh --pull --checkpoints   # ...and the .pt files
+```
+
+Lands in `./results-remote/` (gitignored). Checkpoints are excluded by default:
+~2.7 MB each × ~20 snapshots × 18 runs is about a gigabyte, and the CSVs are what
+you actually plot.
+
+---
+
+## 8. Reading the results
 
 The decision comparison is `e_r0_virt` vs `e_r0_solo` vs `e_r0_short`,
 teacher-absent, ≥ 3 seeds, on `harm_per_100_moves`. Lower virt than solo, with

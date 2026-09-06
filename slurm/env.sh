@@ -4,12 +4,45 @@
 # eval_array.sh and sync_wandb.sh. Everything cluster-specific lives here so no
 # account name or path is copy-pasted into a job script.
 #
-# Every value can be overridden from the environment, e.g.
-#   ACCOUNT=def-someoneelse WALLTIME=12:00:00 bash run_all.sh
+# Precedence, highest first:
+#   1. the environment      ACCOUNT=def-other bash run_all.sh
+#   2. .env                 credentials and per-user settings (gitignored)
+#   3. the defaults below
+#
+# ── .env ──────────────────────────────────────────────────────────────────────
+# Credentials and per-user settings live in .env, never in git. Copy example.env
+# to .env and fill it in.
+#
+# Loaded FIRST so its values are in place before the ${VAR:-default} lines below,
+# which is what makes .env beat the defaults. But a variable ALREADY set in the
+# environment is left alone, so a one-off `ACCOUNT=def-other bash run_all.sh`
+# still wins -- and so does the submitting environment that SLURM propagates into
+# a job. Parsed by hand rather than `source`d: .env is data, and sourcing it would
+# execute whatever it contains and clobber the shell env unconditionally.
+_ENV_SELF="${BASH_SOURCE[0]}"
+_ENV_ROOT="$(cd "$(dirname "$_ENV_SELF")/.." 2>/dev/null && pwd || echo "$PWD")"
+ENV_FILE="${ENV_FILE:-$_ENV_ROOT/.env}"
+if [[ -f "$ENV_FILE" ]]; then
+    while IFS= read -r _line || [[ -n "$_line" ]]; do
+        _line="${_line%$'\r'}"                       # tolerate CRLF
+        [[ "$_line" =~ ^[[:space:]]*(#|$) ]] && continue
+        _line="${_line#"${_line%%[![:space:]]*}"}"   # ltrim
+        _line="${_line#export }"
+        _key="${_line%%=*}"; _key="${_key%"${_key##*[![:space:]]}"}"
+        [[ "$_key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
+        [[ -n "${!_key+x}" ]] && continue            # already set: leave it
+        _val="${_line#*=}"
+        _val="${_val#"${_val%%[![:space:]]*}"}"      # trim
+        _val="${_val%"${_val##*[![:space:]]}"}"
+        [[ "$_val" == \"*\" || "$_val" == \'*\' ]] && _val="${_val:1:${#_val}-2}"
+        export "$_key=$_val"
+    done < "$ENV_FILE"
+fi
+unset _ENV_SELF _ENV_ROOT _line _key _val
 
 # ── SLURM ─────────────────────────────────────────────────────────────────────
 ACCOUNT="${ACCOUNT:-def-mcrowley}"
-MAIL_USER="${MAIL_USER:-p269sing@uwaterloo.ca}"
+MAIL_USER="${MAIL_USER:-}"
 MAIL_TYPE="${MAIL_TYPE:-END,FAIL}"
 
 # CPU-only: sociapl/ has no CUDA code at all (no torch.device, no .cuda(), no
@@ -41,8 +74,13 @@ SCRATCH_ROOT="${SCRATCH_ROOT:-${SCRATCH:-$HOME/scratch}/Virtue_RL}"
 RUNS_DIR="${RUNS_DIR:-$SCRATCH_ROOT/runs}"
 LOGS_DIR="${LOGS_DIR:-$SCRATCH_ROOT/logs}"
 
+# ── Cluster (used by slurm/deploy.sh on your LOCAL machine) ──────────────────
+DRAC_USER="${DRAC_USER:-}"
+DRAC_CLUSTER="${DRAC_CLUSTER:-rorqual.alliancecan.ca}"
+DRAC_REMOTE_DIR="${DRAC_REMOTE_DIR:-~/Virtue_RL}"
+
 # ── Weights & Biases ──────────────────────────────────────────────────────────
-export WANDB_PROJECT="${WANDB_PROJECT:-virtue-rl}"
+export WANDB_PROJECT="${WANDB_PROJECT:-virtue_rl}"
 export WANDB_ENTITY="${WANDB_ENTITY:-}"          # blank = your default entity
 
 # Compute nodes have NO outbound internet on DRAC. Offline runs are written to

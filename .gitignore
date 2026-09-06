@@ -20,7 +20,10 @@ wheels/
 env/
 ENV/
 .python-version
+
+# --- Credentials (see example.env, which IS committed) ---
 .env
+!example.env
 
 # --- Tooling caches ---
 .pytest_cache/
@@ -55,6 +58,9 @@ mlruns/
 tb_logs/
 tensorboard/
 events.out.tfevents.*
+
+# --- Results pulled back from the cluster (slurm/deploy.sh --pull) ---
+results-remote/
 
 # --- Data / results that should live on the cluster, not in git ---
 *.csv

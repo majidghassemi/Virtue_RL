@@ -68,7 +68,7 @@ def init(out, config, project=None, entity=None, group=None, name=None,
         run = wandb.init(
             id=_run_id(out, id_file),
             resume="allow",              # a chained pass reopens the same run
-            project=project or os.environ.get("WANDB_PROJECT", "virtue-rl"),
+            project=project or os.environ.get("WANDB_PROJECT", "virtue_rl"),
             entity=entity or os.environ.get("WANDB_ENTITY") or None,
             group=group,                 # seeds of one condition band together
             name=name,

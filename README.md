@@ -24,6 +24,7 @@ of any ethical behaviour.
 | [sociapl/](sociapl/) | environment, model, PPO, training and evaluation |
 | [marlgrid/](marlgrid/) | vendored + patched environment package ([PATCHES.md](marlgrid/PATCHES.md)) |
 | [slurm/](slurm/) | cluster configuration and job scripts |
+| [example.env](example.env) | template for credentials — copy to `.env` (gitignored) |
 
 ## Quick start
 
@@ -38,9 +39,16 @@ cd sociapl && python train_ethics.py --episodes 2000 --out runs/smoke
 On the cluster — see [experiment.md](experiment.md) for the real version:
 
 ```bash
-bash slurm/setup_env.sh              # once, on a login node
-GRID=pilot bash run_all.sh           # 3 conditions x 1 seed @ 200k
-bash slurm/sync_wandb.sh             # push to wandb.ai
+cp example.env .env && chmod 600 .env   # wandb key, DRAC user, account
+bash slurm/deploy.sh                    # rsync the code up
+ssh <you>@rorqual.alliancecan.ca
+cd ~/Virtue_RL
+bash slurm/setup_env.sh                 # once, on a login node
+GRID=pilot bash run_all.sh              # 3 conditions x 1 seed @ 200k
+bash slurm/sync_wandb.sh                # push to wandb.ai
 ```
+
+Deployment is rsync, not git — no remote to configure, and `.env` reaches the
+cluster without ever being committed.
 
 CPU-only throughout; there is no GPU code path.
