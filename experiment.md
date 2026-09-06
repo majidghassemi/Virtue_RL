@@ -1,316 +1,127 @@
-# Running the experiment on Rorqual
+# Running the experiment
 
-The runbook for the Ethical Goal Cycle grid on the Digital Research Alliance of
-Canada. What the numbers mean is in [METRICS.md](METRICS.md); the science is in
-[sociapl/README.md](sociapl/README.md).
+Everything lives in one directory on the cluster: `/home/prab/links/scratch/virtue_rl`
+(code, venv, runs, logs, wandb). Set it in `.env`.
 
-Everything runs on **CPU**. `sociapl/` contains no CUDA code at all, and the
-bottleneck is pure-Python marlgrid env stepping, which a GPU cannot help with.
-Never add `--gres` to these jobs.
+CPU only — no GPU, ever.
 
 ---
 
-## 0. The shape of it
-
-```
-.env                    your credentials and cluster settings (gitignored; see example.env)
-slurm/deploy.sh         rsync code up / results down       ← run LOCALLY
-run_all.sh              submitter — the only thing you invoke (login node, bash, NOT sbatch)
-slurm/env.sh            account, walltime, paths, wandb settings; loads .env
-slurm/grid.sh           which conditions x seeds exist, per GRID
-slurm/setup_env.sh      one-time venv build (login node)
-slurm/train_array.sh    one array task = one (condition, seed)
-slurm/eval_array.sh     one array task = every snapshot of one run
-slurm/sync_wandb.sh     push offline runs to wandb.ai (login node)
-```
-
-Two facts drive the whole design:
-
-- **Compute nodes have no outbound internet.** So `pip install` must happen on a
-  login node, and wandb runs offline and is pushed separately.
-- **A run needs far more than one walltime.** So training is a *chain* of passes
-  that resume from `ckpt.pt`, and being killed by the clock is the normal way for
-  a pass to end.
-
-The loop, once set up, is: edit locally → `bash slurm/deploy.sh` → `bash run_all.sh`
-on the cluster → `bash slurm/sync_wandb.sh`.
-
----
-
-## 1. One-time setup
-
-### a. Credentials, locally
+## 1. Configure (local, once)
 
 ```bash
-cp example.env .env && chmod 600 .env
-$EDITOR .env
+cp example.env .env
 ```
 
-Fill in at least `WANDB_API_KEY` (from https://wandb.ai/authorize), `DRAC_USER`,
-and `ACCOUNT`. `.env` is gitignored — credentials never enter the repository.
+Edit `.env`: `REMOTE_HOST`, `REMOTE_DIR`, `ACCOUNT`, `WANDB_API_KEY`.
 
-Precedence is: shell environment > `.env` > the defaults in `slurm/env.sh`. So a
-one-off `ACCOUNT=def-other bash run_all.sh` still overrides everything.
-
-### b. Push the code
+## 2. Push the code (local)
 
 ```bash
-bash slurm/deploy.sh --dry-run     # see what would transfer
-bash slurm/deploy.sh
+bash sync.sh --push
 ```
 
-rsync, not git: no remote to configure, no commit needed to try a change, and it
-carries `.env` (which git will not) so your key reaches the cluster without ever
-being committed. `deploy.sh` sets `.env` to mode 600 on the far side, since
-`$HOME` is on a shared filesystem.
+Run this again after any code change. Outputs and the venv are never touched.
 
-Outputs never move: `venv/`, `runs/`, `logs/`, `wandb/`, caches and `*.pt` are all
-excluded, so deploying mid-experiment cannot disturb a running job.
-
-### c. Build the environment, on the cluster
+## 3. Build the venv (login node, once)
 
 ```bash
-ssh <you>@rorqual.alliancecan.ca
-cd ~/Virtue_RL && bash slurm/setup_env.sh
+ssh prab@rorqual.alliancecan.ca
+cd /home/prab/links/scratch/virtue_rl
+bash slurm/setup.sh
 ```
 
-`setup_env.sh` builds `venv/`, creates the `$SCRATCH/Virtue_RL` output tree,
-symlinks `sociapl/runs` and `logs` into it, and smoke-tests the imports. Expect
-to see `params 668,555` and `env obs (21, 21, 3)` — if the parameter count is
-different, the network does not match the paper and nothing downstream is
-comparable. It also reports whether it found your wandb key.
+Must be a login node — compute nodes have no internet.
 
-Only step (c) is once-per-cluster. Afterwards, shipping a change is just
-`bash slurm/deploy.sh` again.
-
-### Why output lives on `$SCRATCH`
-
-`$HOME` has a file-**count** quota (~500k inodes) and wandb writes thousands of
-small files. `runs/`, `logs/` and `wandb/` therefore live under
-`$SCRATCH/Virtue_RL`, reached through symlinks so every script can use plain
-relative paths.
-
-**`$SCRATCH` is purged on a ~60-day policy.** Sync to wandb and copy anything you
-care about to `~/projects` before then.
-
----
-
-## 2. Shakedown (30 minutes)
-
-Never submit the full grid first. Prove the plumbing on a short job:
+## 4. Test the environment (login node)
 
 ```bash
-GRID=pilot PASSES=1 WALLTIME=00:30:00 bash run_all.sh
+bash slurm/test.sh
+```
+
+Takes ~2 minutes. Trains 128 episodes, resumes to 192, evaluates, and checks the
+wandb offline run. Ends with `PASS`. Do not skip this — it catches a broken
+install in two minutes instead of after a day in the queue.
+
+## 5. Run (login node)
+
+```bash
+GRID=pilot bash run_all.sh      # 3 conditions x 1 seed @ 200k  — do this first
+bash run_all.sh                 # full: 6 conditions x 3 seeds @ 800k
+```
+
+Submits the training array, then an evaluation array that starts when training
+finishes.
+
+```bash
 squeue -u $USER
-```
-
-Three tasks should queue, land on CPU nodes, and start writing. Check:
-
-```bash
 tail -f logs/slurm-*.out
 ```
 
-You want to see, in order:
+## 6. Push to wandb (login node)
 
-1. the `── Task ──` block naming the run and its condition flags,
-2. `params: 668,555`,
-3. rows of numbers appearing every ~128 episodes,
-4. `[wandb] run <id> (e_r0_virt_s0) mode=offline`.
+```bash
+bash slurm/sync_wandb.sh
+```
 
-And on disk: `$SCRATCH/Virtue_RL/runs/e_r0_virt_s0/{log.csv,ckpt.pt,config.json,wandb_id.txt}`.
+Safe to run any time, including mid-training. Re-running is a no-op.
+
+## 7. Get results (local, optional)
+
+```bash
+bash sync.sh --pull             # log.csv, config.json, eval JSON -> ./results/
+bash sync.sh --pull --checkpoints
+```
 
 ---
 
-## 3. Pilot (this is the step that sizes everything else)
+## Which script runs where
 
-```bash
-GRID=pilot bash run_all.sh
-```
+| | where | when |
+|---|---|---|
+| `sync.sh --push` / `--pull` | your machine | after every code change |
+| `slurm/setup.sh` | login node | once |
+| `slurm/test.sh` | login node | after setup, and after any dependency change |
+| `run_all.sh` | login node | to submit |
+| `slurm/sync_wandb.sh` | login node | any time |
 
-3 conditions × 1 seed at 200k episodes: `e_r0_virt`, `e_r0_solo`, `e_r0_short` —
-the kill experiment plus its control. [sociapl/README.md](sociapl/README.md) is
-explicit that this comes first: *"run a 200k-episode pilot ... and check that
-ordering (a)-(d) appears. If it does not, scaling to 1.5M will not rescue it."*
-
-When it finishes, **measure throughput before committing to the full grid**:
-
-```bash
-tail -1 $SCRATCH/Virtue_RL/runs/e_r0_virt_s0/log.csv
-# columns: episodes,...,sec   ->   episodes/sec = episodes / sec
-```
-
-`sec` restarts at each chained pass, so take it from a single pass. Then:
-
-```
-PASSES needed  ~=  800000 / (episodes_per_sec * seconds_of_walltime)
-```
-
-Set `PASSES` from that number rather than guessing. Over-chaining is harmless
-(finished runs exit immediately), under-chaining just means re-running
-`run_all.sh` later.
-
-Before scaling, sanity-check the pilot against METRICS.md's *"Reading order when
-a run looks wrong"*:
-
-| check | healthy |
-|---|---|
-| `l_aux` | falls ~0.40 → ~0.10 in the first few hundred episodes |
-| `ent` | starts ~1.94 (uniform over 7 actions), eases down |
-| `kl` | well under 0.01; repeatedly hitting 0.03 means instability |
-| `expert_return` | holds ~20-28 throughout (drift = environment bug) |
-
-If `l_aux` is flat, nothing downstream is interpretable — fix that first.
+Never `sbatch` `run_all.sh` — it is a submitter, run it with `bash`.
 
 ---
 
-## 4. Full grid
+## Options
 
-```bash
-bash run_all.sh
-```
+| variable | default | |
+|---|---|---|
+| `GRID` | `full` | `pilot` = 3 conditions x 1 seed @ 200k |
+| `PASSES` | 1 pilot / 4 full | chained training jobs |
+| `WALLTIME` | `24:00:00` | per pass |
+| `SEEDS` | `0 1 2` | e.g. `SEEDS="0 1"` |
+| `ACCOUNT`, `CPUS`, `MEM` | see `slurm/env.sh` | |
 
-6 conditions × 3 seeds at 800k episodes = 18 array tasks, chained over
-`PASSES` (default 4) passes of `WALLTIME` (default 24h).
+One walltime is not enough for a full run, so training is chained: each pass
+resumes from `ckpt.pt`, and being killed by the clock is normal. Finished runs
+exit immediately, so **re-running `run_all.sh` is always safe** — that is how you
+make progress if the chain runs out before 800k episodes.
 
-Knobs:
-
-| variable | effect |
-|---|---|
-| `GRID=pilot\|full` | which grid (default `full`) |
-| `PASSES=N` | chained passes (default 1 pilot / 4 full) |
-| `SEEDS="0 1"` | override the seed list |
-| `WALLTIME=12:00:00` | per-pass walltime |
-| `FORCE=1` | submit finished runs too |
-| `EXCLUDE=node1,node2` | passed straight to `sbatch --exclude` |
-| `CHAIN_EVAL=1` | append evaluation after training |
-| `ACCOUNT`, `CPUS`, `MEM`, ... | anything in `slurm/env.sh` |
-
-**Re-running `run_all.sh` is the normal way to make progress.** It reads each
-run's `ckpt.pt`, skips those that have reached their episode target, and builds
-the array from only the unfinished indices. So if a pass dies, or the chain ran
-out before 800k, just run it again.
-
-To rerun one specific index by hand:
-
-```bash
-sbatch --array=7 --account=def-mcrowley --time=24:00:00 \
-       --cpus-per-task=8 --mem=8G slurm/train_array.sh
-```
-
-`GRID=full bash -c 'source slurm/grid.sh; ...'` will tell you which index is
-which; the mapping is printed by `run_all.sh` on every submission.
+To size `PASSES`, take `episodes` and `sec` from the last row of a run's
+`log.csv` after the pilot: `PASSES ≈ 800000 / (episodes/sec × walltime_seconds)`.
 
 ---
 
-## 5. Push results to wandb
+## If something looks wrong
 
-```bash
-bash slurm/sync_wandb.sh        # on a LOGIN node
-```
+Read `log.csv` in this order (full detail in [METRICS.md](METRICS.md)):
 
-Login nodes have outbound internet; compute nodes do not. The script refuses to
-run inside a job for that reason.
+1. `l_aux` should fall ~0.40 → ~0.10 early. Flat = world model not learning; nothing else is interpretable.
+2. `ent` starts ~1.94 and eases down. Pinned or collapsed = exploration problem.
+3. `expert_return` should hold ~20-28. Drift = environment bug.
+4. `learner_return` must cross 1.0 in social runs, or the harm comparisons are void.
+5. Only then read `harm_per_100_moves`, the decision metric.
 
-Safe to run any time, including mid-training — completed passes sync and the
-live one goes next time. It is idempotent: wandb marks each offline directory
-`.synced` and re-runs are a no-op.
+Other things worth knowing:
 
-**Chained passes merge into one run.** Each run keeps a stable wandb id in
-`runs/<name>/wandb_id.txt`, and metrics are logged at `step=<cumulative
-episodes>`, so a later pass appends to the same cloud run instead of creating a
-duplicate or overwriting earlier points.
-
-In wandb you get `project=virtue_rl`, one run per `(condition, seed)` named
-`e_r0_virt_s0`, grouped by condition so seeds band together. METRICS.md warns:
-*"Plot per-seed curves or batch-level histograms, never only the mean"* — the
-known failure mode is bimodal seeds, and means hide it.
-
-Each run also carries summary stats: `episodes_to_return_1`,
-`final_harm_per_100_moves`, `total_episodes`, `episodes_per_sec`.
-
----
-
-## 6. Evaluation
-
-```bash
-bash run_all.sh --eval-only          # now, on finished runs
-CHAIN_EVAL=1 bash run_all.sh         # or queue it behind training
-```
-
-Evaluates every `ckpt_ep<K>.pt` snapshot plus the final `ckpt.pt` on the 2×2
-grid {teacher, alone} × {seen, unseen}, writing `eval_<ckpt>.json` next to each
-checkpoint and logging to a **separate** wandb run named `<run>_eval`. Separate
-because evaluating snapshots walks the episode axis from the start again, which
-would collide with the training run's already-logged steps.
-
-That sweep is what produces the harm-over-training-time curves, and the
-`virtue_gap` values: `harm_per_100_moves` alone minus with teacher. Per
-METRICS.md, ~0 means internalised behaviour and > 0 means performative
-compliance — *"A large gap is itself a finding (H-C), not a failure."*
-
-`EVAL_EPISODES=100` per cell by default.
-
----
-
-## 7. Getting results back
-
-For plotting and analysis, wandb is usually enough — `sync_wandb.sh` pushes
-straight from the login node, so nothing has to come down to your laptop.
-
-When you do want the raw files:
-
-```bash
-bash slurm/deploy.sh --pull                 # log.csv, config.json, eval_*.json
-bash slurm/deploy.sh --pull --checkpoints   # ...and the .pt files
-```
-
-Lands in `./results-remote/` (gitignored). Checkpoints are excluded by default:
-~2.7 MB each × ~20 snapshots × 18 runs is about a gigabyte, and the CSVs are what
-you actually plot.
-
----
-
-## 8. Reading the results
-
-The decision comparison is `e_r0_virt` vs `e_r0_solo` vs `e_r0_short`,
-teacher-absent, ≥ 3 seeds, on `harm_per_100_moves`. Lower virt than solo, with
-short ≥ solo, supports H-A + H-B.
-
-One gate before any of that is meaningful: `learner_return` must cross 1.0 in the
-social runs. Solo agents plateau at ~1 (one goal, then stop); exceeding it means
-the learner is actually exploiting teacher cues. **If it never crosses, the harm
-comparisons are void** — that is a replication-side failure, not an ethics
-result.
-
-Full detail in [METRICS.md](METRICS.md).
-
----
-
-## Gotchas
-
-**Everything must run from `sociapl/`.** The imports there are flat
-(`from ethics import ...`). The job scripts `cd sociapl` for you; remember it if
-you run anything by hand.
-
-**`$SCRATCH` is purged after ~60 days.** Sync to wandb and copy checkpoints you
-need to `~/projects`.
-
-**`runs/` is a symlink** to `$SCRATCH/Virtue_RL/runs`. `ls -l sociapl/runs` if
-you are unsure where something landed.
-
-**`gym==0.26.2` failing to install** during setup: it uses legacy setup.py
-metadata that newer pip can reject. `setup_env.sh` retries with `setuptools<67`
-and `--no-build-isolation` automatically. If it still fails, install it alone and
-watch the error — do *not* substitute `gymnasium`, which marlgrid does not target.
-
-**Resumed runs are not bit-reproducible.** Weights, optimizer state and episode
-count are checkpointed; `np.random` / torch RNG state are not. A run chained over
-4 passes will not match a single-pass run of the same seed step for step. Worth
-stating in the write-up, since seeds are reported individually.
-
-**`sec` restarts every pass.** It is per-process wallclock, so do not compute
-throughput as `total_episodes / sec` across a chained run. The
-`episodes_per_sec` summary in wandb already accounts for this.
-
-**A job that exits immediately with "target episode count already reached;
-nothing to do"** is correct behaviour, not an error — that run is finished.
+- `$SCRATCH` is purged on a ~60-day policy. Sync to wandb before then.
+- Resumed runs are not bit-reproducible: weights and episode count are checkpointed, RNG state is not.
+- `sec` restarts each pass; don't compute throughput across a chained run.
+- "target episode count already reached; nothing to do" means that run is finished, not broken.

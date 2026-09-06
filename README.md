@@ -28,7 +28,21 @@ of any ethical behaviour.
 
 ## Quick start
 
-Locally:
+```bash
+cp example.env .env      # REMOTE_HOST, REMOTE_DIR, ACCOUNT, WANDB_API_KEY
+bash sync.sh --push      # local -> cluster
+
+ssh prab@rorqual.alliancecan.ca
+cd /home/prab/links/scratch/virtue_rl
+bash slurm/setup.sh      # once
+bash slurm/test.sh       # ~2 min, verifies the environment
+GRID=pilot bash run_all.sh
+bash slurm/sync_wandb.sh
+```
+
+Full steps in [experiment.md](experiment.md).
+
+Locally, without a cluster:
 
 ```bash
 pip install -r requirements.txt
@@ -36,19 +50,5 @@ pip install -e ./marlgrid --no-deps
 cd sociapl && python train_ethics.py --episodes 2000 --out runs/smoke
 ```
 
-On the cluster — see [experiment.md](experiment.md) for the real version:
-
-```bash
-cp example.env .env && chmod 600 .env   # wandb key, DRAC user, account
-bash slurm/deploy.sh                    # rsync the code up
-ssh <you>@rorqual.alliancecan.ca
-cd ~/Virtue_RL
-bash slurm/setup_env.sh                 # once, on a login node
-GRID=pilot bash run_all.sh              # 3 conditions x 1 seed @ 200k
-bash slurm/sync_wandb.sh                # push to wandb.ai
-```
-
-Deployment is rsync, not git — no remote to configure, and `.env` reaches the
-cluster without ever being committed.
-
-CPU-only throughout; there is no GPU code path.
+Sync is rsync, not git — no remote to configure, and `.env` reaches the cluster
+without ever being committed. CPU-only throughout; there is no GPU code path.
