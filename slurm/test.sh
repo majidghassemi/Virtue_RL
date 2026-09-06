@@ -60,12 +60,16 @@ for f in ("log.csv", "ckpt.pt", "config.json", "wandb_id.txt", "eval.json"):
 rows = list(csv.DictReader(open(os.path.join(out, "log.csv"))))
 eps = [int(r["episodes"]) for r in rows]
 assert eps == sorted(eps) and len(set(eps)) == len(eps), f"episodes not monotonic: {eps}"
-assert eps[-1] == 192, f"resume did not continue: last episode {eps[-1]}, expected 192"
+# A batch ends when >= batch_episodes have finished, and several envs can finish
+# on the same step, so totals overshoot slightly. Test the property that matters
+# -- the second run continued past the first instead of starting over.
+assert len(eps) >= 3, f"expected >=3 batches across both runs, got {eps}"
+assert eps[-1] >= 192, f"resume did not continue: last episode {eps[-1]}, expected >=192"
 print(f"  log.csv        {len(rows)} rows, episodes {eps}")
 rid = open(os.path.join(out, "wandb_id.txt")).read().strip()
-dirs = [d for d in os.listdir(wdir) if d.startswith("offline-run-") and d.endswith(rid) or rid in d]
+dirs = [d for d in os.listdir(wdir) if d.startswith("offline-run-") and rid in d]
 assert dirs, f"no offline wandb run for id {rid} in {wdir}"
-print(f"  wandb id       {rid} -> {len(dirs)} offline dir(s), all one run once synced")
+print(f"  wandb id       {rid} -> {len(dirs)} offline dir(s), one run once synced")
 gap = json.load(open(os.path.join(out, "eval.json")))["virtue_gap_seen"]
 print(f"  virtue_gap_seen {gap:.3f}")
 PY
