@@ -16,6 +16,7 @@ MANIFEST
 # --- Virtual environments ---
 .venv/
 venv/
+wheels/
 env/
 ENV/
 .python-version
@@ -48,6 +49,8 @@ slurm-*.out
 
 # --- Experiment tracking ---
 wandb/
+wandb_id.txt
+wandb_id_eval.txt
 mlruns/
 tb_logs/
 tensorboard/

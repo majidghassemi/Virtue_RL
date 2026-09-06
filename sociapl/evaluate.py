@@ -26,7 +26,12 @@ def main():
     p.add_argument("--ckpt", required=True); p.add_argument("--aux", default="pred")
     p.add_argument("--episodes", type=int, default=50); p.add_argument("--out", default=None)
     a = p.parse_args()
-    net = SociAPLNet(aux=a.aux); net.load_state_dict(torch.load(a.ckpt)); net.eval()
+    # train.py now saves {"net", "opt", "episodes"} so it can resume; bc.py still
+    # writes a bare state_dict. Accept both.
+    st = torch.load(a.ckpt, map_location="cpu", weights_only=True)
+    net = SociAPLNet(aux=a.aux)
+    net.load_state_dict(st["net"] if isinstance(st, dict) and "net" in st else st)
+    net.eval()
     res = {}
     for name, mode, ng in [("solo_3goal", "solo", 3), ("social_3goal", "social", 3),
                            ("social_4goal", "social", 4), ("solo_4goal", "solo", 4)]:
