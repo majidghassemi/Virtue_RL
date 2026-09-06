@@ -69,16 +69,19 @@ def main():
         # A SEPARATE wandb run from training. Evaluating snapshots walks the
         # episode axis from 0 upward again, which would collide with the
         # training run's already-logged steps if they shared an id.
+        # Named wrun, not run: `run` is the rollout function above, and assigning
+        # to that name anywhere in main() would make it local to the whole
+        # function, breaking the calls to run() that come earlier.
         wdir = a.wandb_dir or os.path.dirname(os.path.abspath(a.ckpt))
         base = os.path.basename(wdir.rstrip("/"))                 # e_r0_virt_s0
-        run = wandb_utils.init(
+        wrun = wandb_utils.init(
             wdir, config=vars(a),
             project=a.wandb_project, entity=a.wandb_entity,
             group=a.wandb_group or base.rsplit("_s", 1)[0],
             name=a.wandb_name or f"{base}_eval",
             job_type="eval", tags=["eval"], id_file="wandb_id_eval.txt",
         )
-        if run is not None:
+        if wrun is not None:
             # Every snapshot of a run logs into this one eval run at its own
             # episode count, giving the harm-vs-training-time curves METRICS.md
             # asks for. eval_array.sh walks the snapshots in ascending order.
@@ -89,8 +92,8 @@ def main():
                     flat.update({f"eval/{k}/{kk}": vv for kk, vv in v.items()})
                 else:
                     flat[f"eval/{k}"] = v
-            wandb_utils.log_dict(run, flat)
-            wandb_utils.finish(run)
+            wandb_utils.log_dict(wrun, flat)
+            wandb_utils.finish(wrun)
 
 
 if __name__ == "__main__":
