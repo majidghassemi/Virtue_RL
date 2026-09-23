@@ -27,9 +27,32 @@ OPTS=(--account="$ACCOUNT" --cpus-per-task="$CPUS" --mem="$MEM" --array="0-$((GR
 [[ -n "$MAIL_USER" ]] && OPTS+=(--mail-user="$MAIL_USER" --mail-type=END,FAIL)
 
 echo "grid '$GRID': $GRID_N runs x $EPISODES episodes, $PASSES pass(es) of $WALLTIME"
+
+# Two jobs writing the same runs/<name>/ would interleave log.csv and race on
+# ckpt.pt, silently corrupting both. A log.csv touched in the last 15 minutes
+# means a job is very likely still writing there.
+live=0
 for ((i = 0; i < GRID_N; i++)); do
-    printf '  [%2d] %s\n' "$i" "$(grid_run_name "${GRID_CONDS[$i]}" "${GRID_SEEDS[$i]}")"
+    name="$(grid_run_name "${GRID_CONDS[$i]}" "${GRID_SEEDS[$i]}")"
+    log="sociapl/runs/$name/log.csv"
+    mark=""
+    if [[ -f "$log" ]] && (( $(date +%s) - $(stat -c %Y "$log") < 900 )); then
+        mark="  <-- ACTIVE (written $(( ($(date +%s) - $(stat -c %Y "$log")) / 60 ))m ago)"
+        live=$((live + 1))
+    fi
+    printf '  [%2d] %s%s\n' "$i" "$name" "$mark"
 done
+
+if (( live > 0 )) && [[ -z "${FORCE:-}" ]]; then
+    echo ""
+    echo "ERROR: $live run(s) above are still being written to by a running job." >&2
+    echo "  Submitting again would put two processes in the same directory and" >&2
+    echo "  corrupt log.csv and ckpt.pt. Options:" >&2
+    echo "    - wait for them to finish (bash slurm/status.sh)" >&2
+    echo "    - submit only the new seeds, e.g. SEEDS=\"1 2\" bash run_all.sh" >&2
+    echo "    - FORCE=1 to override (only if you are certain nothing is running)" >&2
+    exit 1
+fi
 echo ""
 
 # afterany, not afterok: running out of walltime is the expected way for a pass

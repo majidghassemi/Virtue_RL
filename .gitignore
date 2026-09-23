@@ -65,6 +65,10 @@ results-remote/
 # --- Data / results that should live on the cluster, not in git ---
 *.csv
 !**/configs/*.csv
+# Pulled results: log.csv is the primary training record (METRICS.md calls it the
+# source of truth), so it must survive the *.csv rule above. Checkpoints do not --
+# they are ~2.9 GB and stay on the cluster / local disk only.
+!results/**/log.csv
 *.npy
 *.npz
 *.pkl

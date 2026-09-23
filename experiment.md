@@ -54,9 +54,14 @@ Submits the training array, then an evaluation array that starts when training
 finishes.
 
 ```bash
+bash slurm/status.sh     # episodes done, ep/sec, projected finish, per run
 squeue -u $USER
 tail -f logs/slurm-*.out
 ```
+
+`status.sh` is the one to check first: it reads `log.csv` and tells you whether
+each run is progressing, stalled, or done, and whether it will reach its target
+before walltime.
 
 ## 6. Push to wandb (login node)
 
@@ -108,6 +113,21 @@ To size `PASSES`, take `episodes` and `sec` from the last row of a run's
 `log.csv` after the pilot: `PASSES ≈ 800000 / (episodes/sec × walltime_seconds)`.
 
 ---
+
+## Speed
+
+Throughput is roughly 0.2-1.0 episodes/sec, so a 200k run is days, not hours.
+Before trying to fix that, measure where the time goes:
+
+```bash
+cd sociapl && python profile_speed.py --sweep     # collect vs update, by thread count
+bash slurm/bench.sh                               # same node, thread sweep
+bash slurm/bench.sh --conds                       # conditions compared on one node
+```
+
+`collect()` is pure-Python marlgrid env stepping; `update()` is the conv/deconv
+backward pass. Only `update()` can be accelerated by a GPU, so the split is the
+whole story -- `profile_speed.py` prints the resulting ceiling directly.
 
 ## If something looks wrong
 

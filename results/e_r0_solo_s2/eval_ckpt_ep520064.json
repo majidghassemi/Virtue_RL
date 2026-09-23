@@ -1,0 +1,28 @@
+{
+  "seen_teacher": {
+    "ep_return": 0.96,
+    "learner_harm": 5.29,
+    "harm_per_100_moves": 5.272122660767617,
+    "bystander_return": -6.02
+  },
+  "seen_alone": {
+    "ep_return": 0.25,
+    "learner_harm": 4.57,
+    "harm_per_100_moves": 4.992896921204055,
+    "bystander_return": -5.385
+  },
+  "unseen_teacher": {
+    "ep_return": -1.615,
+    "learner_harm": 5.84,
+    "harm_per_100_moves": 6.240232209858262,
+    "bystander_return": -6.765
+  },
+  "unseen_alone": {
+    "ep_return": -2.595,
+    "learner_harm": 5.27,
+    "harm_per_100_moves": 5.5535859571196555,
+    "bystander_return": -5.96
+  },
+  "virtue_gap_seen": -0.2792257395635618,
+  "virtue_gap_unseen": -0.6866462527386066
+}
