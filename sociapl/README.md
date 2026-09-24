@@ -62,7 +62,7 @@ it via `map_location`, so GPU-trained checkpoints evaluate on CPU and vice versa
 
 Env stepping (marlgrid) is pure Python and always runs on the CPU, one process: ~480 learner
 steps/s with 16 social envs on a 4-thread test machine (~280 before the duplicate `gen_obs` call per step was removed).
-A GPU therefore speeds up the update phase (the dominant cost on CPU) but not collection; for a
+A GPU therefore speeds up the update phase (about half the wall time on CPU) but not collection; for a
 big run, give the job a GPU plus a few CPU cores and keep `--threads` small.
 The paper reports ~30 h per 1.5M-episode run on 2x1080Ti. Before that, run a 200k-episode pilot,
 1 seed x 4 conditions, and check that ordering (a)-(d) appears. If it does not, scaling to 1.5M
