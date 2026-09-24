@@ -24,6 +24,7 @@ import numpy as np, torch
 from ethics import EthicsWorker, ENV_KEYS, add_env_args, parse_with_env_config, env_kwargs
 from model import SociAPLNet, get_device
 from ppo import collect, update, HP
+from vecenv import make_vec, auto_procs
 
 
 def main():
@@ -46,16 +47,14 @@ def main():
     p.add_argument("--snapshot_every", type=int, default=0, help="also keep ckpt_ep<K>.pt every N episodes (0 = off)")
     p.add_argument("--threads", type=int, default=4)
     p.add_argument("--device", default="auto", help="auto (cuda > mps > cpu), cuda, cuda:1, mps or cpu")
+    p.add_argument("--n_procs", type=int, default=-1,
+                   help="env subprocesses: -1 = auto (one per env, up to CPUs-1), 0/1 = in-process")
     p.add_argument("--hide_harm", type=int, default=0, help="1 = do not log harm metrics (blind tuning)")
     add_env_args(p)
     a = parse_with_env_config(p)
 
     torch.manual_seed(a.seed); np.random.seed(a.seed); torch.set_num_threads(a.threads)
     os.makedirs(a.out, exist_ok=True)
-    dev = get_device(a.device)
-    if dev.type == "cuda":
-        torch.backends.cudnn.benchmark = True
-    print(f"device: {dev}", flush=True)
     cfg_path = os.path.join(a.out, "config.json")
     if not a.fresh and os.path.exists(cfg_path) and os.path.exists(os.path.join(a.out, "ckpt.pt")):
         with open(cfg_path) as f:
@@ -68,8 +67,16 @@ def main():
         json.dump({**vars(a), **HP}, f, indent=2)
 
     kw = dict(harm_delivery=a.harm_delivery, harm_lambda=a.harm_lambda, **env_kwargs(a))
-    workers = [EthicsWorker(a.mode, a.n_experts, virtuous=bool(a.virtuous), expert_eps=a.expert_eps,
-                            p_social=a.p_social, seed=a.seed * 1000 + i, **kw) for i in range(a.n_envs)]
+    specs = [((a.mode, a.n_experts), dict(virtuous=bool(a.virtuous), expert_eps=a.expert_eps,
+                                          p_social=a.p_social, seed=a.seed * 1000 + i, **kw))
+             for i in range(a.n_envs)]
+    # env subprocesses are forked before CUDA is initialised (get_device below)
+    n_procs = auto_procs(a.n_envs, a.n_procs)
+    envs = make_vec(EthicsWorker, specs, n_procs)
+    dev = get_device(a.device)
+    if dev.type == "cuda":
+        torch.backends.cudnn.benchmark = True
+    print(f"device: {dev}  env processes: {n_procs if n_procs > 1 else 'in-process'}", flush=True)
     net = SociAPLNet(aux=a.aux, view_size=a.view_size).to(dev)
     opt = torch.optim.Adam(net.parameters(), lr=HP["lr"])
     print(f"params: {sum(x.numel() for x in net.parameters()):,}", flush=True)
@@ -117,12 +124,12 @@ def main():
     if new_log:
         log.writeheader()
 
-    obs = np.stack([w.reset() for w in workers]); h, c = net.init_state(a.n_envs)
+    obs = envs.reset(); h, c = net.init_state(a.n_envs)
     t0 = time.time()
     next_snapshot = ((total // a.snapshot_every) + 1) * a.snapshot_every if a.snapshot_every else None
     while total < a.episodes:
         stats = []
-        data, obs, h, c = collect(net, workers, a.batch_episodes, obs, h, c, stats)
+        data, obs, h, c = collect(net, envs, a.batch_episodes, obs, h, c, stats)
         info = update(net, opt, data, a.aux)
         total += len(stats)
         m = lambda k: float(np.mean([s[k] for s in stats]))

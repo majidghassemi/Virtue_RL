@@ -12,6 +12,7 @@ import numpy as np, torch
 from envs import Worker
 from model import SociAPLNet, get_device, load_weights
 from ppo import collect, update, HP
+from vecenv import make_vec, auto_procs
 
 
 def main():
@@ -29,31 +30,37 @@ def main():
     p.add_argument("--out", default="runs/debug")
     p.add_argument("--init", default=None, help="checkpoint to initialise from (for mixed-schedule continuation)")
     p.add_argument("--threads", type=int, default=4)
+    p.add_argument("--n_procs", type=int, default=-1,
+                   help="env subprocesses: -1 = auto (one per env, up to CPUs-1), 0/1 = in-process")
     p.add_argument("--device", default="auto", help="auto (cuda > mps > cpu), cuda, cuda:1, mps or cpu")
     a = p.parse_args()
 
     torch.manual_seed(a.seed); np.random.seed(a.seed); torch.set_num_threads(a.threads)
     os.makedirs(a.out, exist_ok=True)
+    json.dump({**vars(a), **HP}, open(f"{a.out}/config.json", "w"), indent=2)
+
+    specs = [((a.mode, a.n_experts, a.n_goals, a.expert_eps, a.p_social), dict(seed=a.seed * 1000 + i))
+             for i in range(a.n_envs)]
+    # env subprocesses are forked before CUDA is initialised (get_device below)
+    n_procs = auto_procs(a.n_envs, a.n_procs)
+    envs = make_vec(Worker, specs, n_procs)
     dev = get_device(a.device)
     if dev.type == "cuda":
         torch.backends.cudnn.benchmark = True
-    print(f"device: {dev}", flush=True)
-    json.dump({**vars(a), **HP}, open(f"{a.out}/config.json", "w"), indent=2)
-
-    workers = [Worker(a.mode, a.n_experts, a.n_goals, a.expert_eps, a.p_social, seed=a.seed * 1000 + i) for i in range(a.n_envs)]
+    print(f"device: {dev}  env processes: {n_procs if n_procs > 1 else 'in-process'}", flush=True)
     net = SociAPLNet(aux=a.aux).to(dev)
     if a.init:
         net.load_state_dict(load_weights(a.init, dev))
     opt = torch.optim.Adam(net.parameters(), lr=HP["lr"])
     print(f"params: {sum(p.numel() for p in net.parameters()):,}")
 
-    obs = np.stack([w.reset() for w in workers]); h, c = net.init_state(a.n_envs)
+    obs = envs.reset(); h, c = net.init_state(a.n_envs)
     logf = open(f"{a.out}/log.csv", "w", newline="", buffering=1); log = csv.writer(logf); log.writerow(
         ["episodes", "learner_return", "expert_return", "frac_social", "l_pi", "l_v", "l_aux", "ent", "kl", "sec"])
     total, t0 = 0, time.time()
     while total < a.episodes:
         stats = []
-        data, obs, h, c = collect(net, workers, a.batch_episodes, obs, h, c, stats)
+        data, obs, h, c = collect(net, envs, a.batch_episodes, obs, h, c, stats)
         info = update(net, opt, data, a.aux)
         total += len(stats)
         lr_ = np.mean([s["ep_return"] for s in stats]); er = np.mean([s["ep_expert_return"] for s in stats])

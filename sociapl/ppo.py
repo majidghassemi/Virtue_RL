@@ -8,6 +8,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from model import N_ACTIONS
+from vecenv import SerialVec
 
 HP = dict(lr=1e-4, gamma=0.993, lam=0.97, clip=0.2, kl_target=0.01, kl_hard=0.03,
           c_v=0.1, c_aux=3.0, c_ent=1e-5, minibatches=20, mb_trajs=512, seg_len=16)
@@ -28,10 +29,13 @@ class Rollout:
                     val=f(self.val), rew=f(self.rew), mask=f(self.mask), h=f(self.h), c=f(self.c))
 
 
-def collect(net, workers, n_episodes, obs, h, c, stats):
-    """Run workers until n_episodes episodes complete in total. obs/h/c carry across calls.
+def collect(net, envs, n_episodes, obs, h, c, stats):
+    """Run envs until n_episodes episodes complete in total. obs/h/c carry across calls.
+    envs: a vecenv.SerialVec/SubprocVec, or a plain list of workers (stepped in-process).
     The rollout is stored on the network's device (h.device); env stepping stays on the CPU."""
-    B = len(workers)
+    if isinstance(envs, (list, tuple)):
+        envs = SerialVec(envs)
+    B = envs.n
     dev = h.device
     ro = Rollout()
     mask = torch.ones(B, device=dev)
@@ -39,18 +43,12 @@ def collect(net, workers, n_episodes, obs, h, c, stats):
     while done_eps < n_episodes:
         obs_t = torch.as_tensor(obs, device=dev)
         a, logp, v, h_new, c_new = net.act(obs_t, h, c)
-        a_np = a.cpu().numpy()  # one device->host copy per step instead of B .item() syncs
-        next_obs = np.empty_like(obs); true_next = np.empty_like(obs)
-        rew = np.zeros(B, np.float32); new_mask = np.ones(B, np.float32)
-        for i, w in enumerate(workers):
-            o, r, d, info = w.step(a_np[i])
-            rew[i] = r
-            true_next[i] = o  # aux target is the true next frame (pre-reset)
-            if d:
+        # true_next: pre-reset frame (aux target); next_obs: post-reset obs at t+1
+        true_next, next_obs, rew, done, infos = envs.step(a.cpu().numpy())
+        for info in infos:
+            if info is not None:
                 stats.append(info); done_eps += 1
-                new_mask[i] = 0.0
-                o = w.reset()
-            next_obs[i] = o  # obs at t+1 is post-reset
+        new_mask = (~done).astype(np.float32)
         ro.add(obs_t, torch.as_tensor(true_next, device=dev), a, logp, v, torch.as_tensor(rew, device=dev),
                mask, h[0], c[0])
         obs, h, c, mask = next_obs, h_new, c_new, torch.as_tensor(new_mask, device=dev)

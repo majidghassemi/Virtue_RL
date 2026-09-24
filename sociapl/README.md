@@ -60,10 +60,32 @@ All scripts take `--device {auto,cuda,cuda:N,mps,cpu}` (default `auto`: CUDA, th
 The network, the rollout buffer, GAE and the PPO/BC updates run on that device; checkpoints load onto
 it via `map_location`, so GPU-trained checkpoints evaluate on CPU and vice versa.
 
-Env stepping (marlgrid) is pure Python and always runs on the CPU, one process: ~480 learner
-steps/s with 16 social envs on a 4-thread test machine (~280 before the duplicate `gen_obs` call per step was removed).
-A GPU therefore speeds up the update phase (about half the wall time on CPU) but not collection; for a
-big run, give the job a GPU plus a few CPU cores and keep `--threads` small.
+Env stepping (marlgrid) is pure Python on the CPU. `train.py` / `train_ethics.py` split the
+`--n_envs` envs across `--n_procs` subprocesses (default -1 = one per env, up to CPUs-1; 0 =
+in-process). Each process steps a fixed slice of envs, so rollouts are identical to in-process
+stepping (checked in smoke_test.sh). Measured on a 4-core box, 16 envs: 361 -> 695 steps/s with
+3 processes; more cores scale further but that has not been measured here. One run needs about
+1.3 GB for the learner plus ~0.5 GB RSS per env process.
+
+### Compute Canada workflow
+    bash setup_cc.sh                      # once, on a login node: shared venv ($VENV)
+    sbatch smoke_test.sh                  # ~5-10 min on a GPU node; must end with SMOKE TEST PASSED
+    TUNE_EPISODES=<N> bash submit.sh tune_env.sh 2
+    python summarize_tuning.py runs/tune --freeze runs/tune/<chosen> --out env_frozen.json
+    bash submit.sh run_all.sh 4           # 70 array tasks x 4 chained resume passes
+    sbatch rerun_evals.sh
+
+Every grid script (tune_env.sh, run_all.sh, run_r0.sh) is one SLURM array: each task gets
+1 GPU + 12 cores and runs one training run with 11 env processes. `submit.sh` sets `--array`
+from the grid size and chains passes with `afterany`; each pass is < 24 h (the fastest
+scheduling class) and resumes from ckpt.pt, so walltime only costs the last unfinished batch.
+Knobs (environment variables): `RUNS_PER_JOB=K` packs K runs onto one GPU (the model is
+small, so a GPU is mostly idle with one run; give the task K x 12 cores with
+`--cpus-per-task`), `THREADS` (torch threads per run, default 2), `DRY_RUN=1` (print commands),
+`VENV`, `RUN_ROOT`, `ENV_CONFIG`. Per-run output goes to <out>/stdout.log. Match
+`--cpus-per-task` to your cluster's cores per GPU if you want to stay at one GPU's share of a
+node; fewer cores just means fewer env processes per run.
+
 The paper reports ~30 h per 1.5M-episode run on 2x1080Ti. Before that, run a 200k-episode pilot,
 1 seed x 4 conditions, and check that ordering (a)-(d) appears. If it does not, scaling to 1.5M
 will not rescue it.
@@ -76,8 +98,10 @@ will not rescue it.
     train_ethics.py  the experiment grid (see docstring for the 6 commands)
     eval_ethics.py   {teacher, alone} x {seen, unseen_pos, unseen_struct}; reports virtue gaps
     tune_env.sh      SLURM sweep for environment tuning (R0 solo/virt, harm hidden)
+    vecenv.py        parallel env stepping (subprocesses; identical rollouts to serial)
+    cc_common.sh, submit.sh, setup_cc.sh, smoke_test.sh   Compute Canada job plumbing (see Compute)
     summarize_tuning.py  task-only summary of the sweep; --freeze writes env_frozen.json
-    run_all.sh       full grid (70 jobs, 5 seeds); refuses to start without env_frozen.json
+    run_all.sh       full grid (70 runs, 5 seeds); refuses to start without env_frozen.json
     run_r0.sh        R0 kill experiment only (15 jobs)
     rerun_evals.sh   re-evaluates e_r0_solo_s1, e_r1_solo_s1, e_r2_solo_s0 on their final ckpt.pt
 
@@ -113,7 +137,7 @@ wall-conversion placement):
   (detour_ok = 0 in log.csv); this has not happened in testing.
 
 ### Environment tuning, then freeze (before any full run)
-1. `sbatch --export=ALL,TUNE_EPISODES=<N> tune_env.sh`: R0 solo and R0 virt only, detour
+1. `TUNE_EPISODES=<N> bash submit.sh tune_env.sh 2`: R0 solo and R0 virt only, detour
    zero, over penalty {-1.5,-3,-5} x goals {3,4,5} x view {5,7}; `--hide_harm 1` keeps harm
    columns out of log.csv and stdout. Set N from earlier R0-virt curves (long enough for
    return to cross 1); 100k is only a placeholder.
