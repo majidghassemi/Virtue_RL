@@ -2,6 +2,7 @@
 #SBATCH --account=def-YOURPI
 #SBATCH --array=0-8
 #SBATCH --cpus-per-task=8
+##SBATCH --gpus-per-node=1   # uncomment to train on a GPU (--device auto picks it up)
 #SBATCH --mem=8G
 #SBATCH --time=6-23:00
 #SBATCH --output=slurm_%A_%a.out

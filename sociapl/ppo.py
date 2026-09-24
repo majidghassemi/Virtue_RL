@@ -29,29 +29,33 @@ class Rollout:
 
 
 def collect(net, workers, n_episodes, obs, h, c, stats):
-    """Run workers until n_episodes episodes complete in total. obs/h/c carry across calls."""
+    """Run workers until n_episodes episodes complete in total. obs/h/c carry across calls.
+    The rollout is stored on the network's device (h.device); env stepping stays on the CPU."""
     B = len(workers)
+    dev = h.device
     ro = Rollout()
-    mask = torch.ones(B)
+    mask = torch.ones(B, device=dev)
     done_eps = 0
     while done_eps < n_episodes:
-        obs_t = torch.as_tensor(obs)
+        obs_t = torch.as_tensor(obs, device=dev)
         a, logp, v, h_new, c_new = net.act(obs_t, h, c)
-        next_obs = np.empty_like(obs); rew = np.zeros(B, np.float32); new_mask = torch.ones(B)
+        a_np = a.cpu().numpy()  # one device->host copy per step instead of B .item() syncs
+        next_obs = np.empty_like(obs); true_next = np.empty_like(obs)
+        rew = np.zeros(B, np.float32); new_mask = np.ones(B, np.float32)
         for i, w in enumerate(workers):
-            o, r, d, info = w.step(a[i].item())
+            o, r, d, info = w.step(a_np[i])
             rew[i] = r
+            true_next[i] = o  # aux target is the true next frame (pre-reset)
             if d:
                 stats.append(info); done_eps += 1
                 new_mask[i] = 0.0
                 o = w.reset()
-            next_obs[i] = o
-        # next_obs stored for aux target is the true next frame (pre-reset), obs at t+1 is post-reset
-        true_next = np.stack([workers[i].env.gen_obs()[0] if new_mask[i] > 0 else next_obs[i] for i in range(B)]).astype(np.uint8)
-        ro.add(obs_t, torch.as_tensor(true_next), a, logp, v, torch.as_tensor(rew), mask, h[0], c[0])
-        obs, h, c, mask = next_obs, h_new, c_new, new_mask
+            next_obs[i] = o  # obs at t+1 is post-reset
+        ro.add(obs_t, torch.as_tensor(true_next, device=dev), a, logp, v, torch.as_tensor(rew, device=dev),
+               mask, h[0], c[0])
+        obs, h, c, mask = next_obs, h_new, c_new, torch.as_tensor(new_mask, device=dev)
     with torch.no_grad():
-        _, _, last_v, _, _ = net.act(torch.as_tensor(obs), h, c)
+        _, _, last_v, _, _ = net.act(torch.as_tensor(obs, device=dev), h, c)
     data = ro.stack()
     data["last_val"] = last_v; data["last_mask"] = mask
     return data, obs, h, c
@@ -59,7 +63,7 @@ def collect(net, workers, n_episodes, obs, h, c, stats):
 
 def gae(data, gamma, lam):
     T, B = data["rew"].shape
-    adv = torch.zeros(T, B); last = torch.zeros(B)
+    adv = torch.zeros_like(data["rew"]); last = torch.zeros_like(data["rew"][0])
     next_v = data["last_val"]; next_m = data["last_mask"]
     for t in reversed(range(T)):
         delta = data["rew"][t] + gamma * next_v * next_m - data["val"][t]
@@ -75,16 +79,21 @@ def update(net, opt, data, aux_mode, hp=HP):
     adv = (adv - adv.mean()) / (adv.std() + 1e-8)
     L = hp["seg_len"]
     starts = [(t, b) for b in range(B) for t in range(0, T - L + 1, L)]
+    dev = data["rew"].device
+    starts_t = torch.as_tensor(starts, dtype=torch.long, device=dev).reshape(-1, 2)
+    offs = torch.arange(L, device=dev).unsqueeze(1)  # (L, 1)
     snapshot = copy.deepcopy(net.state_dict()); opt_snap = copy.deepcopy(opt.state_dict())
     logs = {"pi": [], "v": [], "aux": [], "ent": [], "kl": []}
     for it in range(hp["minibatches"]):
         idx = np.random.choice(len(starts), min(hp["mb_trajs"], len(starts)), replace=False)
-        sel = [starts[i] for i in idx]
-        g = lambda k: torch.stack([data[k][t:t + L, b] for t, b in sel], 1)  # (L, N, ...)
-        obs, nobs, act, old_logp, mask = g("obs"), g("next_obs"), g("act"), g("logp"), g("mask")
-        A, R = g_adv(adv, sel, L), g_adv(ret, sel, L)
-        h0 = torch.stack([data["h"][t, b] for t, b in sel], 0).unsqueeze(0)
-        c0 = torch.stack([data["c"][t, b] for t, b in sel], 0).unsqueeze(0)
+        sel = starts_t[torch.as_tensor(idx, device=dev)]
+        t0, b0 = sel[:, 0], sel[:, 1]
+        ti, bi = t0.unsqueeze(0) + offs, b0.unsqueeze(0)  # (L, N), (1, N)
+        g = lambda x: x[ti, bi]  # one batched gather -> (L, N, ...), same as stacking x[t:t+L, b]
+        obs, nobs, act, old_logp, mask = g(data["obs"]), g(data["next_obs"]), g(data["act"]), g(data["logp"]), g(data["mask"])
+        A, R = g(adv), g(ret)
+        h0 = data["h"][t0, b0].unsqueeze(0)
+        c0 = data["c"][t0, b0].unsqueeze(0)
         feat, _ = net.forward_seq(obs, h0, c0, mask)
         logits, value = net.heads(feat)
         dist = torch.distributions.Categorical(logits=logits)
@@ -94,7 +103,7 @@ def update(net, opt, data, aux_mode, hp=HP):
         l_v = F.mse_loss(value, R)
         ent = dist.entropy().mean()
         if aux_mode == "none":
-            l_aux = torch.zeros(())
+            l_aux = torch.zeros((), device=dev)
         else:
             target = (nobs if aux_mode == "pred" else obs).float() / 255.0
             l_aux = (net.aux_predict(feat, act) - target).abs().mean()
@@ -111,6 +120,3 @@ def update(net, opt, data, aux_mode, hp=HP):
             break
     return {k: (float(np.mean(v)) if isinstance(v, list) and v else v) for k, v in logs.items()}
 
-
-def g_adv(x, sel, L):
-    return torch.stack([x[t:t + L, b] for t, b in sel], 1)

@@ -10,6 +10,24 @@ import torch.nn.functional as F
 N_ACTIONS = 7
 
 
+def get_device(name="auto"):
+    """'auto' -> cuda if available, else mps (Apple GPU), else cpu. Otherwise passed to torch.device."""
+    if name == "auto":
+        if torch.cuda.is_available():
+            return torch.device("cuda")
+        if getattr(torch.backends, "mps", None) is not None and torch.backends.mps.is_available():
+            return torch.device("mps")
+        return torch.device("cpu")
+    return torch.device(name)
+
+
+def load_weights(path, device="cpu"):
+    """Network state_dict from either a weights-only file (train.py, bc.py) or a
+    train_ethics.py checkpoint {net, opt, episodes}, mapped onto `device`."""
+    st = torch.load(path, map_location=device)
+    return st["net"] if isinstance(st, dict) and "net" in st else st
+
+
 class SociAPLNet(nn.Module):
     def __init__(self, aux="pred", hidden=192):
         super().__init__()
@@ -71,11 +89,12 @@ class SociAPLNet(nn.Module):
     @torch.no_grad()
     def act(self, obs, h, c, deterministic=False):
         """Single step for B parallel envs. obs: (B,21,21,3)."""
-        feat, (h, c) = self.forward_seq(obs.unsqueeze(0), h, c, torch.ones(1, obs.shape[0]))
+        feat, (h, c) = self.forward_seq(obs.unsqueeze(0), h, c, torch.ones(1, obs.shape[0], device=obs.device))
         logits, value = self.heads(feat[0])
         dist = torch.distributions.Categorical(logits=logits)
         a = logits.argmax(-1) if deterministic else dist.sample()
         return a, dist.log_prob(a), value, h, c
 
     def init_state(self, B):
-        return torch.zeros(1, B, self.hidden), torch.zeros(1, B, self.hidden)
+        dev = next(self.parameters()).device
+        return torch.zeros(1, B, self.hidden, device=dev), torch.zeros(1, B, self.hidden, device=dev)

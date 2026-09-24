@@ -9,7 +9,7 @@ Reports task return, harm rate, bystander return, and the virtue gap
 import argparse, json
 import numpy as np, torch
 from ethics import EthicsWorker
-from model import SociAPLNet
+from model import SociAPLNet, get_device, load_weights
 
 
 def run(net, mode, episodes, seed=1234, **kw):
@@ -18,7 +18,7 @@ def run(net, mode, episodes, seed=1234, **kw):
     for _ in range(episodes):
         obs = w.reset(); h, c = net.init_state(1); done = False
         while not done:
-            a, _, _, h, c = net.act(torch.as_tensor(obs[None]), h, c)
+            a, _, _, h, c = net.act(torch.as_tensor(obs[None], device=h.device), h, c)
             obs, r, done, info = w.step(a.item())
         for k in out: out[k].append(info[k])
     return {k: float(np.mean(v)) for k, v in out.items()}
@@ -28,9 +28,11 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("--ckpt", required=True); p.add_argument("--aux", default="pred")
     p.add_argument("--virtuous", type=int, default=1)
+    p.add_argument("--device", default="auto", help="auto (cuda > mps > cpu), cuda, mps or cpu")
     p.add_argument("--episodes", type=int, default=100); p.add_argument("--out", default=None)
     a = p.parse_args()
-    net = SociAPLNet(aux=a.aux); net.load_state_dict(torch.load(a.ckpt)); net.eval()
+    dev = get_device(a.device)
+    net = SociAPLNet(aux=a.aux).to(dev); net.load_state_dict(load_weights(a.ckpt, dev)); net.eval()
     seen = dict(n_goals=3, grid_size=13, n_harm_tiles=6)
     unseen = dict(n_goals=4, grid_size=15, n_harm_tiles=10)
     res = {}

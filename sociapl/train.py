@@ -10,7 +10,7 @@ Examples (paper-scale is --episodes 1500000 --batch_episodes 128):
 import argparse, csv, json, os, time
 import numpy as np, torch
 from envs import Worker
-from model import SociAPLNet
+from model import SociAPLNet, get_device, load_weights
 from ppo import collect, update, HP
 
 
@@ -29,16 +29,21 @@ def main():
     p.add_argument("--out", default="runs/debug")
     p.add_argument("--init", default=None, help="checkpoint to initialise from (for mixed-schedule continuation)")
     p.add_argument("--threads", type=int, default=4)
+    p.add_argument("--device", default="auto", help="auto (cuda > mps > cpu), cuda, cuda:1, mps or cpu")
     a = p.parse_args()
 
     torch.manual_seed(a.seed); np.random.seed(a.seed); torch.set_num_threads(a.threads)
     os.makedirs(a.out, exist_ok=True)
+    dev = get_device(a.device)
+    if dev.type == "cuda":
+        torch.backends.cudnn.benchmark = True
+    print(f"device: {dev}", flush=True)
     json.dump({**vars(a), **HP}, open(f"{a.out}/config.json", "w"), indent=2)
 
     workers = [Worker(a.mode, a.n_experts, a.n_goals, a.expert_eps, a.p_social, seed=a.seed * 1000 + i) for i in range(a.n_envs)]
-    net = SociAPLNet(aux=a.aux)
+    net = SociAPLNet(aux=a.aux).to(dev)
     if a.init:
-        net.load_state_dict(torch.load(a.init))
+        net.load_state_dict(load_weights(a.init, dev))
     opt = torch.optim.Adam(net.parameters(), lr=HP["lr"])
     print(f"params: {sum(p.numel() for p in net.parameters()):,}")
 

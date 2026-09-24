@@ -17,7 +17,7 @@ harm-over-training curves (~2.7 MB each; default 0 = off).
 import argparse, csv, json, os, time
 import numpy as np, torch
 from ethics import EthicsWorker
-from model import SociAPLNet
+from model import SociAPLNet, get_device
 from ppo import collect, update, HP
 
 
@@ -42,16 +42,21 @@ def main():
     p.add_argument("--fresh", type=int, default=0, help="1 = ignore an existing <out>/ckpt.pt and start over")
     p.add_argument("--snapshot_every", type=int, default=0, help="also keep ckpt_ep<K>.pt every N episodes (0 = off)")
     p.add_argument("--threads", type=int, default=4)
+    p.add_argument("--device", default="auto", help="auto (cuda > mps > cpu), cuda, cuda:1, mps or cpu")
     a = p.parse_args()
 
     torch.manual_seed(a.seed); np.random.seed(a.seed); torch.set_num_threads(a.threads)
     os.makedirs(a.out, exist_ok=True)
+    dev = get_device(a.device)
+    if dev.type == "cuda":
+        torch.backends.cudnn.benchmark = True
+    print(f"device: {dev}", flush=True)
     json.dump({**vars(a), **HP}, open(f"{a.out}/config.json", "w"), indent=2)
 
     kw = dict(harm_delivery=a.harm_delivery, harm_lambda=a.harm_lambda, n_harm_tiles=a.n_harm_tiles)
     workers = [EthicsWorker(a.mode, a.n_experts, a.n_goals, bool(a.virtuous), a.expert_eps,
                             a.p_social, seed=a.seed * 1000 + i, **kw) for i in range(a.n_envs)]
-    net = SociAPLNet(aux=a.aux)
+    net = SociAPLNet(aux=a.aux).to(dev)
     opt = torch.optim.Adam(net.parameters(), lr=HP["lr"])
     print(f"params: {sum(x.numel() for x in net.parameters()):,}", flush=True)
 
@@ -64,7 +69,7 @@ def main():
     elif a.init:
         resume_from = a.init
     if resume_from:
-        st = torch.load(resume_from, map_location="cpu")
+        st = torch.load(resume_from, map_location=dev)
         if isinstance(st, dict) and "net" in st:
             net.load_state_dict(st["net"])
             if "opt" in st and resume_from == ckpt_path:

@@ -6,7 +6,7 @@ Reports mean learner return in: solo 3-goal, social 3-goal, social 4-goal (zero-
 import argparse, json
 import numpy as np, torch
 from envs import Worker
-from model import SociAPLNet
+from model import SociAPLNet, get_device, load_weights
 
 
 def run(net, mode, n_goals, episodes, seed=123, n_experts=2, expert_eps=0.0):
@@ -15,7 +15,7 @@ def run(net, mode, n_goals, episodes, seed=123, n_experts=2, expert_eps=0.0):
     for ep in range(episodes):
         obs = w.reset(); h, c = net.init_state(1); done = False
         while not done:
-            a, _, _, h, c = net.act(torch.as_tensor(obs[None]), h, c)
+            a, _, _, h, c = net.act(torch.as_tensor(obs[None], device=h.device), h, c)
             obs, r, done, info = w.step(a.item())
         rets.append(info["ep_return"]); erets.append(info["ep_expert_return"])
     return float(np.mean(rets)), float(np.std(rets)), float(np.mean(erets))
@@ -24,9 +24,11 @@ def run(net, mode, n_goals, episodes, seed=123, n_experts=2, expert_eps=0.0):
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--ckpt", required=True); p.add_argument("--aux", default="pred")
+    p.add_argument("--device", default="auto", help="auto (cuda > mps > cpu), cuda, mps or cpu")
     p.add_argument("--episodes", type=int, default=50); p.add_argument("--out", default=None)
     a = p.parse_args()
-    net = SociAPLNet(aux=a.aux); net.load_state_dict(torch.load(a.ckpt)); net.eval()
+    dev = get_device(a.device)
+    net = SociAPLNet(aux=a.aux).to(dev); net.load_state_dict(load_weights(a.ckpt, dev)); net.eval()
     res = {}
     for name, mode, ng in [("solo_3goal", "solo", 3), ("social_3goal", "social", 3),
                            ("social_4goal", "social", 4), ("solo_4goal", "solo", 4)]:

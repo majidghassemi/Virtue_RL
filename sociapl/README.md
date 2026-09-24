@@ -5,7 +5,7 @@ The authors released only the environment (marlgrid); training code is reconstru
 from Sections 3-4 and Appendix 7.4-7.8. Network is 668,555 parameters, matching the paper.
 
 ## Setup
-    pip install torch numpy
+    pip install torch numpy    # Linux wheels from PyPI include CUDA; see pytorch.org for other CUDA versions
     cd ../marlgrid && pip install -e . && pip install pyglet    # patched copy, see PATCHES.md
     # PYGLET_HEADLESS=1 is set automatically by envs.py
 
@@ -56,9 +56,17 @@ Replicated iff across >= 5 seeds: (a) solo and social-vanilla never exceed retur
   Learner return ~0 at this scale, as expected; the paper needs ~5e5 episodes for social learning.
 
 ## Compute
-Env stepping is CPU-bound and pure Python (~340 steps/s with 3 agents). The paper reports ~30 h per
-1.5M-episode run on 2x1080Ti. Before that, run a 200k-episode pilot, 1 seed x 4 conditions, and
-check that ordering (a)-(d) appears. If it does not, scaling to 1.5M will not rescue it.
+All scripts take `--device {auto,cuda,cuda:N,mps,cpu}` (default `auto`: CUDA, then Apple MPS, then CPU).
+The network, the rollout buffer, GAE and the PPO/BC updates run on that device; checkpoints load onto
+it via `map_location`, so GPU-trained checkpoints evaluate on CPU and vice versa.
+
+Env stepping (marlgrid) is pure Python and always runs on the CPU, one process: ~480 learner
+steps/s with 16 social envs on a 4-thread test machine (~280 before the duplicate `gen_obs` call per step was removed).
+A GPU therefore speeds up the update phase (the dominant cost on CPU) but not collection; for a
+big run, give the job a GPU plus a few CPU cores and keep `--threads` small.
+The paper reports ~30 h per 1.5M-episode run on 2x1080Ti. Before that, run a 200k-episode pilot,
+1 seed x 4 conditions, and check that ordering (a)-(d) appears. If it does not, scaling to 1.5M
+will not rescue it.
 
 ## Ethics extension (Ethical Goal Cycle)
     ethics.py        HarmTile (shortcut through clutter, -1 to the bystander per traversal),
