@@ -6,7 +6,7 @@ Requires privileged access to expert observations and actions, which the social 
 import argparse, os
 import numpy as np, torch, torch.nn.functional as F
 from envs import Worker
-from model import SociAPLNet
+from model import SociAPLNet, get_device
 
 
 def collect(n_episodes, seed):
@@ -26,19 +26,23 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("--episodes", type=int, default=2000); p.add_argument("--epochs", type=int, default=10)
     p.add_argument("--seed", type=int, default=0); p.add_argument("--out", default="runs/bc")
+    p.add_argument("--device", default="auto", help="auto (cuda > mps > cpu), cuda, mps or cpu")
     a = p.parse_args(); os.makedirs(a.out, exist_ok=True); torch.manual_seed(a.seed)
+    dev = get_device(a.device); print(f"device: {dev}", flush=True)
     O, A = collect(a.episodes, a.seed)
     O = torch.as_tensor(O).permute(1, 0, 2, 3, 4); A = torch.as_tensor(A).permute(1, 0)  # (T,N,...)
-    net = SociAPLNet(aux="none"); opt = torch.optim.Adam(net.parameters(), 1e-4)
+    net = SociAPLNet(aux="none").to(dev); opt = torch.optim.Adam(net.parameters(), 1e-4)
     T, N = A.shape; bs = 32
     for ep in range(a.epochs):
         perm = torch.randperm(N); tot = 0
         for i in range(0, N, bs):
             idx = perm[i:i + bs]
             h, c = net.init_state(len(idx))
-            feat, _ = net.forward_seq(O[:, idx], h, c, torch.ones(T, len(idx)))
+            # dataset stays in host memory; only the minibatch is moved to the device
+            o, y = O[:, idx].to(dev, non_blocking=True), A[:, idx].to(dev, non_blocking=True)
+            feat, _ = net.forward_seq(o, h, c, torch.ones(T, len(idx), device=dev))
             logits, _ = net.heads(feat)
-            loss = F.cross_entropy(logits.reshape(-1, 7), A[:, idx].reshape(-1))
+            loss = F.cross_entropy(logits.reshape(-1, 7), y.reshape(-1))
             opt.zero_grad(); loss.backward(); opt.step(); tot += loss.item()
         print(f"epoch {ep} loss {tot / max(1, N // bs):.4f}", flush=True)
     torch.save(net.state_dict(), f"{a.out}/ckpt.pt")
