@@ -70,11 +70,57 @@ will not rescue it.
 
 ## Ethics extension (Ethical Goal Cycle)
     ethics.py        HarmTile (shortcut through clutter, -1 to the bystander per traversal),
-                     EthicalGoalCycleEnv (R0/R1/R2 via --harm_delivery), EthicalExpert
-                     (virtuous avoids harm tiles in BFS; control variant takes them), EthicsWorker
+                     EthicalGoalCycleEnv (R0/R1/R2 via --harm_delivery; layout pool, goal-order
+                     shuffle, detour-cost levels), EthicalExpert (virtuous avoids harm tiles in
+                     BFS; control variant takes them), EthicsWorker, shared env-design CLI
     train_ethics.py  the experiment grid (see docstring for the 6 commands)
-    eval_ethics.py   2x2 evaluation: {teacher, alone} x {seen, unseen}; reports virtue gap
+    eval_ethics.py   {teacher, alone} x {seen, unseen_pos, unseen_struct}; reports virtue gaps
+    tune_env.sh      SLURM sweep for environment tuning (R0 solo/virt, harm hidden)
+    summarize_tuning.py  task-only summary of the sweep; --freeze writes env_frozen.json
+    run_all.sh       full grid (70 jobs, 5 seeds); refuses to start without env_frozen.json
+    run_r0.sh        R0 kill experiment only (15 jobs)
+    rerun_evals.sh   re-evaluates e_r0_solo_s1, e_r1_solo_s1, e_r2_solo_s0 on their final ckpt.pt
 
 Verified: virtuous teachers cause 0 harm events/ep, shortcut teachers ~26; virtue costs the
 teacher ~2 return (22.5 vs 24.6); dense and delayed learner penalties apply correctly.
-Kill experiment = e_r0_virt vs e_r0_solo harm rate at ~200k episodes, 3 seeds.
+Kill experiment = e_r0_virt vs e_r0_solo harm rate at ~200k episodes, 5 seeds.
+
+### Environment-design options (train_ethics.py / eval_ethics.py flags or --env_config JSON)
+All default to the original environment; with defaults the env is bit-identical to before.
+
+    --penalty P          wrong-order goal penalty (magnitude used; default -1.5)
+    --n_goals, --grid_size, --n_harm_tiles
+    --view_size V        learner view in tiles (>= 5, default 7 = paper's 21x21). The network
+                         adapts; view 7 keeps exactly the paper's 668,555 parameters.
+    --harm_detour L      any | zero | small | large. Rejection-samples layouts by detour cost =
+                         mean over goal pairs of (shortest harm-free path - shortest path), in
+                         moves; zero = virtue is free, small = (0.1, 1], large = [2, inf).
+                         Override the band with --detour_band LO HI.
+    --n_layouts K        0 = fresh random layout every episode (default); K > 0 = fixed training
+                         pool of K layouts (seeds --layout_seed ..+K-1). Needed for unseen_pos.
+    --shuffle_order 1    new goal cycle order every episode (use with a layout pool)
+
+Facts measured before choosing these (13x13, 3 goals, 6 harm tiles, 1000 layouts, current
+wall-conversion placement):
+- Goal positions are already re-drawn every episode (as are clutter and harm tiles), and all
+  goal tiles look identical, so the cycle order is already random relative to position. The
+  pool/shuffle options only matter once layouts are restricted to a finite pool.
+- 78% of layouts already have zero detour; 95th pct 1.33, 99th pct 2.67 moves per pair;
+  avoidance is impossible in ~1.4% (excluded from every explicit band). Excess path length
+  is always even, so with 3 goals 'small' means exactly one pair with a 2-move detour.
+- Cost of rejection sampling per reset: ~4 ms (zero), ~10 ms (small), ~34 ms (large, 3 goals),
+  ~125 ms (large, 5 goals). Layouts failing the band after 1000 tries are kept and flagged
+  (detour_ok = 0 in log.csv); this has not happened in testing.
+
+### Environment tuning, then freeze (before any full run)
+1. `sbatch --export=ALL,TUNE_EPISODES=<N> tune_env.sh`: R0 solo and R0 virt only, detour
+   zero, over penalty {-1.5,-3,-5} x goals {3,4,5} x view {5,7}; `--hide_harm 1` keeps harm
+   columns out of log.csv and stdout. Set N from earlier R0-virt curves (long enough for
+   return to cross 1); 100k is only a placeholder.
+2. `python summarize_tuning.py runs/tune`: task metrics only. A cell passes if solo final
+   return <= --solo_max (1.5) in all seeds and virt final return >= --virt_min (2.0) in a
+   majority. Fix the thresholds before reading the table.
+3. `python summarize_tuning.py runs/tune --freeze runs/tune/<chosen run> --out env_frozen.json`
+   writes the frozen env and prints a dated amendment block to paste into HYPOTHESES.md.
+4. `run_all.sh` / `run_r0.sh` require env_frozen.json and write to runs/v2/. A resumed run
+   refuses to continue if its environment differs from the one it started with.
