@@ -50,6 +50,11 @@ def main():
     p.add_argument("--n_procs", type=int, default=-1,
                    help="env subprocesses: -1 = auto (one per env, up to CPUs-1), 0/1 = in-process")
     p.add_argument("--hide_harm", type=int, default=0, help="1 = do not log harm metrics (blind tuning)")
+    p.add_argument("--wandb", action="store_true", help="mirror log.csv to Weights & Biases (offline on a cluster)")
+    p.add_argument("--wandb_project", default=None)
+    p.add_argument("--wandb_entity", default=None)
+    p.add_argument("--wandb_group", default=None, help="default: the run name without _s<seed>")
+    p.add_argument("--wandb_tags", default="", help="comma-separated")
     add_env_args(p)
     a = parse_with_env_config(p)
 
@@ -102,7 +107,21 @@ def main():
         print(f"resumed from {resume_from} at episode {total}", flush=True)
     if total >= a.episodes:
         print("target episode count already reached; nothing to do", flush=True)
+        envs.close()          # over-chained pass: release the env subprocesses
         return
+
+    # --- wandb (after the early exit, so over-chained passes log nothing) ----
+    wrun = None
+    if a.wandb:
+        import wandb_utils
+        wrun = wandb_utils.init(
+            a.out, config={**vars(a), **HP},
+            project=a.wandb_project, entity=a.wandb_entity, group=a.wandb_group,
+            job_type="train",
+            tags=[a.mode, f"harm_{a.harm_delivery}",
+                  "virtuous" if a.virtuous else "shortcut",
+                  f"detour_{a.harm_detour}", *a.wandb_tags.split(",")],
+        )
 
     def save_ckpt():
         tmp = ckpt_path + ".tmp"
@@ -144,12 +163,19 @@ def main():
         if a.hide_harm:
             row.update({k: "" for k in harm_cols})
         log.writerow(row); logf.flush()
+        if wrun is not None:
+            wandb_utils.log_dict(wrun, row)
         print(" ".join(f"{row[k]:.3f}" if isinstance(row[k], float) else str(row[k]) for k in cols), flush=True)
         save_ckpt()
         if next_snapshot and total >= next_snapshot:
             import shutil
             shutil.copyfile(ckpt_path, os.path.join(a.out, f"ckpt_ep{total}.pt"))
             next_snapshot += a.snapshot_every
+
+    if wrun is not None:
+        wandb_utils.summarize(wrun, log_path)   # from the whole CSV, so it spans every pass
+        wandb_utils.finish(wrun)
+    envs.close()
 
 
 if __name__ == "__main__":

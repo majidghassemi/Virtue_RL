@@ -6,6 +6,10 @@
 #   EXTRA_ARGS    appended to every train command; later flags win (smoke tests shrink runs)
 #   DRY_RUN=1     print the commands for this task instead of running them
 #   VENV          virtualenv built by setup_cc.sh (default $HOME/venvs/virtue_rl)
+# Cluster config + WANDB_* exports. Sourced before the --count early exit so that
+# submit.sh (which calls `bash <grid>.sh --count`) also gets ACCOUNT etc.
+source "$(dirname "${BASH_SOURCE[0]}")/cc_env.sh"
+
 K=${RUNS_PER_JOB:-1}
 THREADS=${THREADS:-2}
 

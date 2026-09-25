@@ -73,7 +73,10 @@ stepping (checked in smoke_test.sh). Measured on a 4-core box, 16 envs: 361 -> 6
     TUNE_EPISODES=<N> bash submit.sh tune_env.sh 2
     python summarize_tuning.py runs/tune --freeze runs/tune/<chosen> --out env_frozen.json
     bash submit.sh run_all.sh 4           # 70 array tasks x 4 chained resume passes
-    sbatch rerun_evals.sh
+    bash submit.sh eval_all.sh 1          # evaluate every finished run (CPU)
+    bash sync_wandb.sh                    # push offline wandb runs (login node)
+
+Operator runbook, start to finish: ../instructions.md
 
 Every grid script (tune_env.sh, run_all.sh, run_r0.sh) is one SLURM array: each task gets
 1 GPU + 12 cores and runs one training run with 11 env processes. `submit.sh` sets `--array`
@@ -103,7 +106,13 @@ will not rescue it.
     summarize_tuning.py  task-only summary of the sweep; --freeze writes env_frozen.json
     run_all.sh       full grid (70 runs, 5 seeds); refuses to start without env_frozen.json
     run_r0.sh        R0 kill experiment only (15 jobs)
-    rerun_evals.sh   re-evaluates e_r0_solo_s1, e_r1_solo_s1, e_r2_solo_s0 on their final ckpt.pt
+    rerun_evals.sh   one-off: re-evaluates e_r0_solo_s1, e_r1_solo_s1, e_r2_solo_s0 (old round)
+    eval_all.sh      evaluates every run under RUN_ROOT; skips evals that already exist
+    cc_env.sh        cluster config from ../.env (account, wandb, remote paths)
+    status.sh        per-run progress, rate and ETA, read from config.json + log.csv
+    sync_wandb.sh    push offline wandb runs to wandb.ai (login node only)
+    probe_node.sh    measure episodes/sec on a compute node; sizes walltime and passes
+    wandb_utils.py   offline wandb logging; stable run id so chained passes merge
 
 Verified: virtuous teachers cause 0 harm events/ep, shortcut teachers ~26; virtue costs the
 teacher ~2 return (22.5 vs 24.6); dense and delayed learner penalties apply correctly.

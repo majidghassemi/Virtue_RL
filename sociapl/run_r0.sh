@@ -22,7 +22,7 @@ job_cmd() {
     solo)  ARGS="--mode solo";;
   esac
   echo "$RUN_ROOT/e_r0_${C}_s${S}"
-  echo "python train_ethics.py $ARGS --harm_delivery none --env_config $ENV_CONFIG --episodes 200000 --n_envs 16 --batch_episodes 128 --seed $S --snapshot_every 20000 --out $RUN_ROOT/e_r0_${C}_s${S}"
+  echo "python train_ethics.py $ARGS --harm_delivery none --env_config $ENV_CONFIG --episodes 200000 --n_envs 16 --batch_episodes 128 --seed $S --snapshot_every 20000 --wandb --out $RUN_ROOT/e_r0_${C}_s${S}"
 }
 
 source "$(dirname "$0")/cc_common.sh"

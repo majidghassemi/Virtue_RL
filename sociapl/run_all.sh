@@ -46,7 +46,7 @@ job_cmd() {
   if [ "$D" != "-" ]; then ARGS="$ARGS --harm_detour $D"; OUT=$RUN_ROOT/e_${C}_d${D}_s${S}; fi
   if [ "$L" != "-" ]; then OUT=$RUN_ROOT/e_${C}_l${L}_s${S}; fi
   echo "$OUT"
-  echo "python train_ethics.py $ARGS --env_config $ENV_CONFIG --episodes 800000 --n_envs 16 --batch_episodes 128 --seed $S --snapshot_every 40000 --out $OUT"
+  echo "python train_ethics.py $ARGS --env_config $ENV_CONFIG --episodes 800000 --n_envs 16 --batch_episodes 128 --seed $S --snapshot_every 40000 --wandb --out $OUT"
 }
 
 source "$(dirname "$0")/cc_common.sh"

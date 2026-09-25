@@ -56,6 +56,14 @@ events.out.tfevents.*
 # --- Data / results that should live on the cluster, not in git ---
 *.csv
 !**/configs/*.csv
+# log.csv is the primary training record (METRICS.md: "the CSV is the source of
+# truth"), so it must survive the *.csv rule above. Checkpoints do not -- they are
+# GBs and stay on the cluster. Without these two lines a `git add .` silently
+# uploads config/eval JSON and drops every training log.
+# (An exception under sociapl/runs/ would NOT work: `runs/` above excludes the
+# whole directory, and git cannot re-include a file inside an excluded directory.
+# The copy that gets committed is the pulled one in results/.)
+!results/**/log.csv
 *.npy
 *.npz
 *.pkl

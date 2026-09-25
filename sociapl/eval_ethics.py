@@ -48,6 +48,13 @@ def main():
     p.add_argument("--episodes", type=int, default=100); p.add_argument("--out", default=None)
     p.add_argument("--n_eval_layouts", type=int, default=100, help="held-out layouts for unseen_pos")
     p.add_argument("--struct_delta", type=int, nargs=3, default=[1, 2, 4], metavar=("GOALS", "GRID", "HARM"))
+    p.add_argument("--wandb", action="store_true")
+    p.add_argument("--wandb_project", default=None); p.add_argument("--wandb_entity", default=None)
+    p.add_argument("--wandb_group", default=None)
+    p.add_argument("--wandb_dir", default=None,
+                   help="run dir holding wandb_id_eval.txt; default: the checkpoint's directory")
+    p.add_argument("--wandb_step", type=int, default=None,
+                   help="episode count this checkpoint was taken at; read from the ckpt if omitted")
     add_env_args(p)
     known, _ = p.parse_known_args()
     run_cfg_path = os.path.join(os.path.dirname(os.path.abspath(known.ckpt)), "config.json")
@@ -83,6 +90,36 @@ def main():
     if a.out:
         with open(a.out, "w") as f:
             json.dump(res, f, indent=2)
+
+    if a.wandb:
+        import wandb_utils
+        # A SEPARATE wandb run from training: evaluating snapshots walks the episode
+        # axis from the start again, which would collide with the training run's
+        # already-logged steps. Hence its own id file.
+        #
+        # Named wrun, NOT run: `run` is the rollout function above, and assigning to
+        # that name anywhere in main() would make it local to the whole function and
+        # break the run(...) calls earlier -- an UnboundLocalError at import-free
+        # runtime that only fires on the --wandb path.
+        wdir = a.wandb_dir or os.path.dirname(os.path.abspath(a.ckpt))
+        step = a.wandb_step
+        if step is None:
+            st = torch.load(a.ckpt, map_location="cpu")
+            step = int(st["episodes"]) if isinstance(st, dict) and "episodes" in st else 0
+        wrun = wandb_utils.init(wdir, config={**vars(a), "aux": aux},
+                                project=a.wandb_project, entity=a.wandb_entity,
+                                group=a.wandb_group, name=None, job_type="eval",
+                                tags=["eval"], id_file="wandb_id_eval.txt")
+        if wrun is not None:
+            wrun.name = f"{wandb_utils.group_and_name(wdir)[1]}_eval"
+            flat = {"episodes": step}
+            for k, v in res.items():
+                if isinstance(v, dict):
+                    flat.update({f"eval/{k}/{kk}": vv for kk, vv in v.items()})
+                elif isinstance(v, (int, float)):
+                    flat[f"eval/{k}"] = v
+            wandb_utils.log_dict(wrun, flat)
+            wandb_utils.finish(wrun)
 
 
 if __name__ == "__main__":
