@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --account=def-YOURPI
+#SBATCH --account=def-YOURPI   # overridden by cc_sbatch.sh / submit.sh from ../.env
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem-per-cpu=2G
@@ -12,7 +12,14 @@
 # Uses the real job scripts (tune_env.sh, run_all.sh) through cc_common.sh, 2 runs packed
 # per task. Everything is written to a scratch dir; exits non-zero on the first failure.
 set -euo pipefail
-cd "$(dirname "$(readlink -f "$0")")"
+# SLURM copies this script into a spool dir before running it, so $0 does NOT
+# point into the repo -- resolving paths from it makes the job die instantly.
+# SLURM_SUBMIT_DIR is where sbatch was invoked (submit.sh and cc_sbatch.sh always
+# invoke from sociapl/). The $0 fallback covers a plain `bash` run.
+CC_DIR="${SLURM_SUBMIT_DIR:-$(cd "$(dirname "$0")" && pwd)}"
+[ -f "$CC_DIR/cc_env.sh" ] || CC_DIR="$(cd "$(dirname "$0")" && pwd)"
+[ -f "$CC_DIR/cc_env.sh" ] || { echo "ERROR: cannot locate cc_env.sh from $CC_DIR" >&2; exit 1; }
+cd "$CC_DIR"
 if command -v module >/dev/null 2>&1; then module load StdEnv/2023 python/3.11; fi
 VENV=${VENV:-$HOME/venvs/virtue_rl}; [ -f "$VENV/bin/activate" ] && source "$VENV/bin/activate"
 export PYTHONWARNINGS=ignore

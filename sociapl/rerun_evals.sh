@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --account=def-YOURPI
+#SBATCH --account=def-YOURPI   # overridden by cc_sbatch.sh / submit.sh from ../.env
 #SBATCH --cpus-per-task=4
 #SBATCH --mem-per-cpu=2G
 #SBATCH --time=0-06:00

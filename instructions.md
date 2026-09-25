@@ -43,14 +43,24 @@ Must be a login node — compute nodes have no internet, so `pip` only works her
 ## 4. Smoke test (GPU node)
 
 ```bash
-sbatch smoke_test.sh          # ~5-10 min
+bash cc_sbatch.sh smoke_test.sh     # ~5-10 min
 ```
+
+Use `cc_sbatch.sh`, not bare `sbatch`: the job scripts carry a placeholder
+`--account=def-YOURPI`, and this wrapper replaces it with the account from `.env`.
+(Grid scripts in steps 6-9 go through `submit.sh`, which does the same thing.)
 
 Must end with `SMOKE TEST PASSED`. It checks the GPU path, that subprocess
 rollouts are bit-identical to serial, resume-from-checkpoint, every entry point,
 and that harm columns stay blank under `--hide_harm`.
 
 ## 5. Measure throughput (GPU node) — sizes everything downstream
+
+```bash
+bash cc_sbatch.sh probe_node.sh      # queue it; read slurm_probe_<jobid>.out
+```
+
+Or interactively, if GPU nodes are free:
 
 ```bash
 salloc --account=def-mcrowley --gpus-per-node=1 --cpus-per-task=12 \
@@ -131,13 +141,17 @@ bash sync.sh --pull --checkpoints   # also the .pt files (GBs)
 |---|---|---|
 | `sync.sh --push` / `--pull` | your machine | after every code change |
 | `setup_cc.sh` | login node | once |
-| `smoke_test.sh` | GPU node (`sbatch`) | after setup, after any dependency change |
+| `cc_sbatch.sh <job>` | login node | one-off jobs (`smoke_test.sh`) |
+| `smoke_test.sh` | GPU node | after setup, after any dependency change |
 | `probe_node.sh` | GPU node (`salloc`) | once, to size passes |
 | `submit.sh <grid> <passes>` | login node | to submit |
 | `status.sh`, `sync_wandb.sh` | login node | any time |
 
-`submit.sh` is a submitter — run it with `bash`, never `sbatch`. The grid scripts
-(`run_all.sh`, `tune_env.sh`, `eval_all.sh`) are the things `sbatch` runs.
+`submit.sh` and `cc_sbatch.sh` are submitters — run them with `bash`, never
+`sbatch`. The grid scripts (`run_all.sh`, `tune_env.sh`, `eval_all.sh`) are the
+things they submit. Neither needs you to edit the `def-YOURPI` placeholder; both
+inject `--account` from `.env`. Bare `sbatch <job>.sh` will fail on that
+placeholder.
 
 ## Knobs
 

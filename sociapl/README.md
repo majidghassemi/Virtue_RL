@@ -69,7 +69,7 @@ stepping (checked in smoke_test.sh). Measured on a 4-core box, 16 envs: 361 -> 6
 
 ### Compute Canada workflow
     bash setup_cc.sh                      # once, on a login node: shared venv ($VENV)
-    sbatch smoke_test.sh                  # ~5-10 min on a GPU node; must end with SMOKE TEST PASSED
+    bash cc_sbatch.sh smoke_test.sh       # ~5-10 min on a GPU node; must end with SMOKE TEST PASSED
     TUNE_EPISODES=<N> bash submit.sh tune_env.sh 2
     python summarize_tuning.py runs/tune --freeze runs/tune/<chosen> --out env_frozen.json
     bash submit.sh run_all.sh 4           # 70 array tasks x 4 chained resume passes
@@ -103,6 +103,7 @@ will not rescue it.
     tune_env.sh      SLURM sweep for environment tuning (R0 solo/virt, harm hidden)
     vecenv.py        parallel env stepping (subprocesses; identical rollouts to serial)
     cc_common.sh, submit.sh, setup_cc.sh, smoke_test.sh   Compute Canada job plumbing (see Compute)
+    cc_sbatch.sh     sbatch a one-off job with the account/mail from ../.env
     summarize_tuning.py  task-only summary of the sweep; --freeze writes env_frozen.json
     run_all.sh       full grid (70 runs, 5 seeds); refuses to start without env_frozen.json
     run_r0.sh        R0 kill experiment only (15 jobs)

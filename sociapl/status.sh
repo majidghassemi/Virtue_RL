@@ -12,6 +12,13 @@ cd "$(dirname "$0")"
 source cc_env.sh
 RUN_ROOT=${RUN_ROOT:-runs/v2}
 
+# Only needs python3 for a one-line json read (stdlib), not the venv. But a bare
+# login shell may have no python3 on PATH, which would silently report every
+# target as 0; load the module if one is available.
+if ! command -v python3 >/dev/null 2>&1 && command -v module >/dev/null 2>&1; then
+  module load StdEnv/2023 python/3.11 >/dev/null 2>&1 || true
+fi
+
 echo "── queue ──────────────────────────────────────────────"
 squeue -u "$USER" -o "%.12i %.12j %.3t %.11M %.11l %R" 2>/dev/null || echo "  (squeue unavailable)"
 

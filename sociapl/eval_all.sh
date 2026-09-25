@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --account=def-YOURPI
+#SBATCH --account=def-YOURPI   # overridden by cc_sbatch.sh / submit.sh from ../.env
 #SBATCH --cpus-per-task=4
 #SBATCH --mem-per-cpu=2G
 #SBATCH --time=0-12:00
@@ -34,7 +34,14 @@ done
 # No job_cmd/run_grid here: cc_common.sh is sourced only for --count, the venv and
 # the WANDB_* exports. This script drives its own loop because one run maps to a
 # variable number of checkpoints.
-source "$(dirname "$0")/cc_common.sh"
+# SLURM copies this script into a spool dir before running it, so $0 does NOT
+# point into the repo -- resolving paths from it makes the job die instantly.
+# SLURM_SUBMIT_DIR is where sbatch was invoked (submit.sh and cc_sbatch.sh always
+# invoke from sociapl/). The $0 fallback covers a plain `bash` run.
+CC_DIR="${SLURM_SUBMIT_DIR:-$(cd "$(dirname "$0")" && pwd)}"
+[ -f "$CC_DIR/cc_env.sh" ] || CC_DIR="$(cd "$(dirname "$0")" && pwd)"
+[ -f "$CC_DIR/cc_env.sh" ] || { echo "ERROR: cannot locate cc_env.sh from $CC_DIR" >&2; exit 1; }
+source "$CC_DIR/cc_common.sh"
 
 if [ ${#JOBS[@]} -eq 0 ]; then
   echo "no runs with ckpt.pt under $RUN_ROOT"; exit 1

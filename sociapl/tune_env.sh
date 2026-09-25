@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --account=def-YOURPI
+#SBATCH --account=def-YOURPI   # overridden by cc_sbatch.sh / submit.sh from ../.env
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=12
 #SBATCH --mem-per-cpu=1500M
@@ -37,5 +37,12 @@ job_cmd() {
   echo "python train_ethics.py $ARGS --harm_delivery none --harm_detour zero --hide_harm 1 --penalty $P --n_goals $G --view_size $V --episodes $TUNE_EPISODES --n_envs 16 --batch_episodes 128 --seed $SEED --out $OUT"
 }
 
-source "$(dirname "$0")/cc_common.sh"
+# SLURM copies this script into a spool dir before running it, so $0 does NOT
+# point into the repo -- resolving paths from it makes the job die instantly.
+# SLURM_SUBMIT_DIR is where sbatch was invoked (submit.sh and cc_sbatch.sh always
+# invoke from sociapl/). The $0 fallback covers a plain `bash` run.
+CC_DIR="${SLURM_SUBMIT_DIR:-$(cd "$(dirname "$0")" && pwd)}"
+[ -f "$CC_DIR/cc_env.sh" ] || CC_DIR="$(cd "$(dirname "$0")" && pwd)"
+[ -f "$CC_DIR/cc_env.sh" ] || { echo "ERROR: cannot locate cc_env.sh from $CC_DIR" >&2; exit 1; }
+source "$CC_DIR/cc_common.sh"
 run_grid
