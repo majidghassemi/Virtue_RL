@@ -40,6 +40,17 @@ bash setup_cc.sh
 
 Must be a login node — compute nodes have no internet, so `pip` only works here.
 
+The venv lands at **`~/venvs/virtue_rl`**, deliberately outside the project
+directory so `sync.sh --push` can never overwrite it. There is no `venv/` inside
+`sociapl/`. To activate it by hand:
+
+```bash
+source cc_env.sh && cc_activate
+```
+
+Jobs do this themselves — you only need it for step 6's `summarize_tuning.py`.
+Override the location with `VENV=...` in `.env`.
+
 ## 4. Smoke test (GPU node)
 
 ```bash
@@ -77,7 +88,9 @@ pass count in steps 6 and 8. At 5 ep/s, 800k episodes is ~1.9 days = 2 passes.
 
 ```bash
 TUNE_EPISODES=<N> bash submit.sh tune_env.sh 2
-bash status.sh                                        # RUN_ROOT=runs/tune to watch it
+RUN_ROOT=runs/tune bash status.sh                     # watch it
+
+source cc_env.sh && cc_activate                       # summarize needs numpy
 python summarize_tuning.py runs/tune
 python summarize_tuning.py runs/tune --freeze runs/tune/<chosen> --out env_frozen.json
 ```
@@ -165,7 +178,8 @@ placeholder.
 | `EXTRA_ARGS` | — | appended to every train command; later flags win |
 | `EVAL_EPISODES` | 100 | episodes per evaluation cell |
 | `FORCE=1` | — | re-do evaluations that already exist |
-| `ACCOUNT`, `MAIL_USER` | from `.env` | injected by `submit.sh` |
+| `ACCOUNT`, `MAIL_USER` | from `.env` | injected by `submit.sh` / `cc_sbatch.sh` |
+| `VENV` | `~/venvs/virtue_rl` | built by `setup_cc.sh`, outside the repo |
 
 Shakedown without submitting anything:
 

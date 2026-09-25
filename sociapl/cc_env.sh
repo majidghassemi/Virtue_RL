@@ -32,6 +32,24 @@ export ACCOUNT="${ACCOUNT:-def-mcrowley}"
 export MAIL_USER="${MAIL_USER:-}"
 export MAIL_TYPE="${MAIL_TYPE:-END,FAIL}"
 
+# ── Python environment ────────────────────────────────────────────────────────
+# Built by setup_cc.sh. Deliberately OUTSIDE the project directory so that
+# `sync.sh --push` can never overwrite or delete it.
+export VENV="${VENV:-$HOME/venvs/virtue_rl}"
+
+# Activate it in the current shell. Jobs do this via cc_common.sh; use this
+# directly when running python by hand (e.g. summarize_tuning.py):
+#     source sociapl/cc_env.sh && cc_activate
+cc_activate() {
+  if command -v module >/dev/null 2>&1; then module load StdEnv/2023 python/3.11; fi
+  if [ -f "$VENV/bin/activate" ]; then
+    source "$VENV/bin/activate"
+  else
+    echo "ERROR: no venv at $VENV — run 'bash setup_cc.sh' on a login node." >&2
+    return 1
+  fi
+}
+
 # ── Sync (../sync.sh, run on your local machine) ──────────────────────────────
 export REMOTE_HOST="${REMOTE_HOST:-}"
 export REMOTE_DIR="${REMOTE_DIR:-/home/prab/links/scratch/virtue_rl}"
